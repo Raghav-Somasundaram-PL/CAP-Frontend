@@ -1,21 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Archive,
+  ArchiveRestore,
   ArrowLeft,
   BarChart3,
   BadgeCheck,
   Check,
+  ChevronRight,
   Clock3,
   Code2,
+  Download,
   FileText,
   Gauge,
+  Info,
   ListChecks,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -74,11 +79,13 @@ import type {
   QuestionGroupRecord,
   QuestionRecord,
 } from "../types/QuestionBank";
+import { assessmentPath, assessmentTestPath } from "../utils/assessmentRoutes";
 
 type RecruiterView = "list" | "create" | "assessment" | "test";
-type AssessmentDetailMode = "tests" | "questions" | "evaluation";
+type AssessmentDetailMode = "tests" | "questions" | "analytics";
 type QuestionSetMode = "select-questions" | "select-groups" | "custom";
 type AssessmentCreateSection = "basics" | "questions" | "rules";
+type QuestionSetupStep = 1 | 2 | 3 | 4;
 
 const ASSESSMENT_LANGUAGES = ["python", "java", "cpp", "c"] as const;
 const QUESTION_DIFFICULTIES: DifficultyLevel[] = ["easy", "medium", "hard"];
@@ -91,6 +98,19 @@ const LANGUAGE_LABELS: Record<(typeof ASSESSMENT_LANGUAGES)[number], string> = {
 
 export function RecruiterAssessmentsPage() {
   const { currentUser } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const {
+    assessmentId: routeAssessmentId,
+    assessmentTestId: routeAssessmentTestId,
+    testId: routeTestId,
+  } = useParams<{
+    assessmentId?: string;
+    assessmentTestId?: string;
+    testId?: string;
+  }>();
+  const targetTestId = routeAssessmentTestId || routeTestId || null;
+  const isCreateRoute = location.pathname === "/recruiter/assessments/new";
   const [view, setView] = useState<RecruiterView>("list");
   const [testTab, setTestTab] = useState<TestTab>("candidates");
   const [assessmentForm, setAssessmentForm] = useState<AssessmentCreatePayload>(
@@ -178,9 +198,7 @@ export function RecruiterAssessmentsPage() {
   const inProgressCount = monitoringItems.filter(
     (item) => item.status === "in_progress",
   ).length;
-  const canArchive =
-    Boolean(selectedAssessment) &&
-    selectedAssessment?.status !== "archived";
+  const canToggleArchive = Boolean(selectedAssessment);
 
   useEffect(() => {
     if (!selectedAssessment) {
@@ -200,9 +218,67 @@ export function RecruiterAssessmentsPage() {
   }, [selectedAssessment]);
 
   useEffect(() => {
-    setSelectedSlotId(null);
+    if (!targetTestId) {
+      setSelectedSlotId(null);
+    }
     setTestTab("candidates");
-  }, [selectedAssessmentId]);
+  }, [targetTestId, selectedAssessmentId]);
+
+  useEffect(() => {
+    if (isCreateRoute) {
+      setSelectedAssessmentId(null);
+      setSelectedSlotId(null);
+      setView("create");
+      return;
+    }
+    if (!routeAssessmentId && !targetTestId) {
+      setSelectedAssessmentId(null);
+      setSelectedSlotId(null);
+      setView("list");
+      return;
+    }
+
+    let resolvedAssessmentId = routeAssessmentId || null;
+    if (!resolvedAssessmentId && targetTestId && assessments.length > 0) {
+      const found = assessments.find((assessment) =>
+        (assessment.slots || []).some((slot) => slot.id === targetTestId)
+      );
+      if (found) {
+        resolvedAssessmentId = found.id;
+      }
+    }
+
+    setSelectedAssessmentId(resolvedAssessmentId);
+    setSelectedSlotId(targetTestId || null);
+    setView(targetTestId ? "test" : "assessment");
+  }, [isCreateRoute, routeAssessmentId, targetTestId, assessments]);
+
+  useEffect(() => {
+    if (!selectedAssessmentId || assessmentsQuery.isLoading) {
+      return;
+    }
+    if (!selectedAssessment) {
+      navigate("/recruiter/assessments", { replace: true });
+      return;
+    }
+    if (targetTestId) {
+      if (!slotsQuery.isSuccess) {
+        return;
+      }
+      if (!selectedSlot && !slotsQuery.isFetching) {
+        navigate(assessmentPath(selectedAssessment.id, selectedAssessment.title), { replace: true });
+      }
+    }
+  }, [
+    assessmentsQuery.isLoading,
+    navigate,
+    targetTestId,
+    selectedAssessment,
+    selectedAssessmentId,
+    selectedSlot,
+    slotsQuery.isSuccess,
+    slotsQuery.isFetching,
+  ]);
 
   async function handleCreateAssessment() {
     const created = await createAssessmentMutation.mutateAsync(assessmentForm);
@@ -219,16 +295,23 @@ export function RecruiterAssessmentsPage() {
     setCreateQuestionIds([]);
     setAssessmentPageSuccessMessage("Assessment created successfully.");
     setView("assessment");
+    navigate(assessmentPath(created.id, created.title));
   }
 
   async function handleArchiveAssessment() {
     if (!selectedAssessment) {
       return;
     }
+    const nextStatus = selectedAssessment.status === "archived" ? "available" : "archived";
     await updateAssessmentMutation.mutateAsync({
       assessmentId: selectedAssessment.id,
-      payload: { status: "archived" },
+      payload: { status: nextStatus },
     });
+    setAssessmentPageSuccessMessage(
+      nextStatus === "archived"
+        ? "Assessment archived successfully."
+        : "Assessment restored successfully.",
+    );
   }
 
   async function handleDeleteAssessment() {
@@ -239,6 +322,7 @@ export function RecruiterAssessmentsPage() {
     setSelectedAssessmentId(null);
     setAssessmentPageSuccessMessage("Assessment deleted successfully.");
     setView("list");
+    navigate("/recruiter/assessments");
   }
 
   async function handleUpdateAssessment(payload: Partial<AssessmentCreatePayload>) {
@@ -291,7 +375,7 @@ export function RecruiterAssessmentsPage() {
   }
 
   async function handleCreateSlot() {
-    if (!selectedAssessmentId) {
+    if (!selectedAssessmentId || !selectedAssessment) {
       return;
     }
     setSlotScheduleError("");
@@ -352,6 +436,7 @@ export function RecruiterAssessmentsPage() {
       status: "scheduled",
     });
     setView("test");
+    navigate(assessmentTestPath(selectedAssessment.id, created.id, selectedAssessment.title, created.title));
   }
 
   async function handleImportCandidates(csvText = candidateCsv) {
@@ -376,64 +461,6 @@ export function RecruiterAssessmentsPage() {
     });
   }
 
-  function openAssessment(assessmentId: string) {
-    setSelectedAssessmentId(assessmentId);
-    setView("assessment");
-  }
-
-  function openTest(slotId: string) {
-    setSelectedSlotId(slotId);
-    setTestTab("candidates");
-    setView("test");
-  }
-
-  function toggleQuestion(questionId: string, checked: boolean) {
-    setQuestionSelection((current) => {
-      if (!checked) {
-        const next = { ...current };
-        delete next[questionId];
-        return next;
-      }
-      const requiredCount = selectedAssessment?.question_count_per_candidate || 0;
-      const question = questionById.get(questionId);
-      const blueprint = selectedAssessment?.difficulty_blueprint || [];
-      if (question && !blueprint.includes(question.difficulty)) {
-        setWarningToast(
-          `${question.difficulty} questions are not included in this assessment template.`,
-        );
-        return current;
-      }
-      if (
-        selectedAssessment &&
-        !selectedAssessment.shuffle_questions &&
-        requiredCount > 0 &&
-        Object.keys(current).length >= requiredCount
-      ) {
-        setWarningToast(
-          `Same-set mode allows exactly ${requiredCount} questions. Remove one before adding another.`,
-        );
-        return current;
-      }
-      if (selectedAssessment && !selectedAssessment.shuffle_questions) {
-        const expectedDifficulty = blueprint[Object.keys(current).length];
-        if (question && expectedDifficulty && question.difficulty !== expectedDifficulty) {
-          setWarningToast(
-            `The next template slot requires a ${expectedDifficulty} question.`,
-          );
-          return current;
-        }
-      }
-      return {
-        ...current,
-        [questionId]: {
-          question_id: questionId,
-          question_order: Object.keys(current).length + 1,
-          marks: 10,
-          is_mandatory: true,
-        },
-      };
-    });
-  }
 
   return (
     <main className="recruiter-assessments-page assessment-flow-page">
@@ -449,8 +476,7 @@ export function RecruiterAssessmentsPage() {
         <AssessmentList
           assessments={assessments}
           loading={assessmentsQuery.isLoading}
-          onAddNew={() => setView("create")}
-          onOpen={openAssessment}
+          onAddNew={() => navigate("/recruiter/assessments/new")}
         />
       ) : null}
 
@@ -471,7 +497,10 @@ export function RecruiterAssessmentsPage() {
             errorMessage(createAssessmentMutation.error) ||
             errorMessage(setQuestionsMutation.error)
           }
-          onBack={() => setView("list")}
+          onBack={() => {
+            navigate("/recruiter/assessments");
+            setView("list");
+          }}
           onCreate={() => void handleCreateAssessment()}
           onChange={setAssessmentForm}
           onChangeQuestions={setCreateQuestionIds}
@@ -486,7 +515,7 @@ export function RecruiterAssessmentsPage() {
           slotsLoading={slotsQuery.isLoading}
           questionBank={questionBankQuery.data?.items || []}
           selectedQuestions={questionSelection}
-          canArchive={canArchive}
+          canArchive={canToggleArchive}
           questionPending={setQuestionsMutation.isPending}
           questionError={errorMessage(setQuestionsMutation.error)}
           publishError={errorMessage(updateAssessmentMutation.error)}
@@ -503,14 +532,13 @@ export function RecruiterAssessmentsPage() {
           evaluationBackfillResult={backfillEvaluationsMutation.data ?? null}
           onBack={() => {
             setAssessmentPageSuccessMessage("");
+            navigate("/recruiter/assessments");
             setView("list");
           }}
-          onOpenTest={openTest}
-          onArchive={() => void handleArchiveAssessment()}
+          onArchive={handleArchiveAssessment}
           onDeleteAssessment={handleDeleteAssessment}
           onUpdateAssessment={handleUpdateAssessment}
           onSaveQuestions={handleSaveQuestions}
-          onToggleQuestion={toggleQuestion}
           onUpdateQuestionSelection={setQuestionSelection}
           onChangeSlot={(nextSlotForm) => {
             setSlotScheduleError("");
@@ -556,7 +584,10 @@ export function RecruiterAssessmentsPage() {
               ? resendInviteMutation.variables
               : null
           }
-          onBack={() => setView("assessment")}
+          onBack={() => {
+            navigate(assessmentPath(selectedAssessment.id, selectedAssessment.title));
+            setView("assessment");
+          }}
           onTabChange={setTestTab}
           onCsvChange={setCandidateCsv}
           onImport={(csvText) => void handleImportCandidates(csvText)}
@@ -648,6 +679,10 @@ function CreateAssessmentView({
       : createQuestionBlueprint(assessmentForm.question_count_per_candidate || 4),
   );
   const [selectionWarning, setSelectionWarning] = useState("");
+  const [questionSetupStep, setQuestionSetupStep] = useState<QuestionSetupStep>(1);
+  const [activeQuestionSetupStep, setActiveQuestionSetupStep] =
+    useState<QuestionSetupStep>(1);
+  const [deliveryConfigured, setDeliveryConfigured] = useState(false);
   const enabledPolicyCount = [
     assessmentForm.allow_resume,
     assessmentForm.shuffle_questions,
@@ -693,7 +728,7 @@ function CreateAssessmentView({
       difficulty: DifficultyLevel;
       tags: string[];
     } => Boolean(question));
-  const blueprintMismatches = assessmentForm.shuffle_questions ? [] : selectedQuestionViews.filter((question, index) => {
+  const blueprintMismatches = selectedQuestionViews.filter((question, index) => {
     const expectedDifficulty = difficultyBlueprint[index];
     return expectedDifficulty && question.difficulty !== expectedDifficulty;
   });
@@ -712,9 +747,9 @@ function CreateAssessmentView({
     (difficulty) => selectedDifficultyCounts[difficulty] >= blueprintCounts[difficulty],
   );
   const templateMarks = calculateQuestionTemplateMarks(difficultyBlueprint);
-  const questionSetReady = assessmentForm.shuffle_questions
+  const questionSetReady = deliveryConfigured && (assessmentForm.shuffle_questions
     ? selectedQuestionIds.length >= desiredQuestionCount && randomPoolMatchesBlueprint
-    : selectedQuestionIds.length === desiredQuestionCount && blueprintMismatches.length === 0;
+    : selectedQuestionIds.length === desiredQuestionCount && blueprintMismatches.length === 0);
   const rulesReady = scoringIsValid && assessmentForm.supported_languages.length > 0;
   const requiredMark = <em className="required-indicator" aria-hidden="true">*</em>;
   const sectionDefinitions = [
@@ -801,36 +836,103 @@ function CreateAssessmentView({
 
   function updateQuestionCount(count: number) {
     const safeCount = Math.max(1, Math.min(50, count || 1));
+    if (safeCount === desiredQuestionCount) {
+      return;
+    }
     setDesiredQuestionCount(safeCount);
-    const nextBlueprint = Array.from(
-      { length: safeCount },
-      (_, index) => difficultyBlueprint[index] || "medium",
-    );
+    const nextBlueprint = createQuestionBlueprint(safeCount);
     setDifficultyBlueprint(nextBlueprint);
-    if (!assessmentForm.shuffle_questions && selectedQuestionIds.length > safeCount) {
-      onChangeQuestions(selectedQuestionIds.slice(0, safeCount));
-      setSelectionWarning(`Same-set mode keeps exactly ${safeCount} questions.`);
+    setQuestionSetupStep(1);
+    setActiveQuestionSetupStep(1);
+    setDeliveryConfigured(false);
+    setSelectedGroupId("");
+    if (selectedQuestionIds.length) {
+      onChangeQuestions([]);
+      setSelectionWarning(
+        `Question count changed to ${safeCount}. Previous selections were cleared because the required template changed.`,
+      );
     }
     onChange({
       ...assessmentForm,
       question_count_per_candidate: safeCount,
       difficulty_blueprint: nextBlueprint,
+      shuffle_questions: false,
     });
   }
 
-  function applyGroupQuestions(group: QuestionGroupRecord) {
-    const nextCount = Math.max(1, group.question_ids.length);
-    const nextBlueprint = group.questions.length
-      ? group.questions.map((question) => question.difficulty)
-      : createQuestionBlueprint(group.question_ids.length);
-    setDesiredQuestionCount(nextCount);
-    setDifficultyBlueprint(nextBlueprint);
+  function confirmQuestionCount() {
+    setQuestionSetupStep((current) => Math.max(current, 2) as QuestionSetupStep);
+    setActiveQuestionSetupStep(2);
+  }
+
+  function confirmDifficultyBlueprint() {
+    setQuestionSetupStep((current) => Math.max(current, 3) as QuestionSetupStep);
+    setActiveQuestionSetupStep(3);
+  }
+
+  function configureDelivery(shuffleQuestions: boolean) {
+    let keepSelection = selectedQuestionIds.length === 0;
+    if (selectedQuestionIds.length) {
+      keepSelection = shuffleQuestions
+        ? selectedQuestionIds.length >= desiredQuestionCount && randomPoolMatchesBlueprint
+        : selectedQuestionIds.length === desiredQuestionCount && blueprintMismatches.length === 0;
+    }
+    if (!keepSelection) {
+      onChangeQuestions([]);
+      setSelectedGroupId("");
+      setSelectionWarning(
+        "Delivery mode changed. Previous questions were cleared because they do not satisfy the new selection rules.",
+      );
+    }
+    setDeliveryConfigured(true);
+    setQuestionSetupStep(4);
+    setActiveQuestionSetupStep(4);
     onChange({
       ...assessmentForm,
-      question_count_per_candidate: nextCount,
-      difficulty_blueprint: nextBlueprint,
+      shuffle_questions: shuffleQuestions,
     });
+  }
+
+  function groupMatchesConfiguredTemplate(group: QuestionGroupRecord) {
+    const groupDifficulties = group.question_ids.map((questionId) =>
+      group.questions.find((question) => question.id === questionId)?.difficulty ||
+      questionById.get(questionId)?.difficulty,
+    );
+    if (groupDifficulties.some((difficulty) => !difficulty)) {
+      return false;
+    }
+    if (!assessmentForm.shuffle_questions) {
+      return (
+        group.question_ids.length === desiredQuestionCount &&
+        groupDifficulties.every(
+          (difficulty, index) => difficulty === difficultyBlueprint[index],
+        )
+      );
+    }
+    const groupCounts = groupDifficulties.reduce<Record<DifficultyLevel, number>>(
+      (counts, difficulty) => ({
+        ...counts,
+        [difficulty as DifficultyLevel]: counts[difficulty as DifficultyLevel] + 1,
+      }),
+      { easy: 0, medium: 0, hard: 0 },
+    );
+    return (
+      group.question_ids.length >= desiredQuestionCount &&
+      QUESTION_DIFFICULTIES.every(
+        (difficulty) => groupCounts[difficulty] >= blueprintCounts[difficulty],
+      )
+    );
+  }
+
+  function applyGroupQuestions(group: QuestionGroupRecord) {
+    if (!groupMatchesConfiguredTemplate(group)) {
+      setSelectionWarning(
+        `The ${group.name} group does not match the configured count, difficulty order, or delivery mode.`,
+      );
+      return false;
+    }
     onChangeQuestions(group.question_ids);
+    return true;
   }
 
   function chooseGroup(groupId: string) {
@@ -839,7 +941,9 @@ function CreateAssessmentView({
     if (!group) {
       return;
     }
-    applyGroupQuestions(group);
+    if (!applyGroupQuestions(group)) {
+      setSelectedGroupId("");
+    }
   }
 
   function handleImportFromGroup() {
@@ -847,13 +951,9 @@ function CreateAssessmentView({
     if (!group) {
       return;
     }
-    const nextQuestionIds = Array.from(
-      new Set([...selectedQuestionIds, ...group.question_ids]),
-    );
-    if (desiredQuestionCount > nextQuestionIds.length) {
-      updateQuestionCount(nextQuestionIds.length);
+    if (!applyGroupQuestions(group)) {
+      return;
     }
-    onChangeQuestions(nextQuestionIds);
     setGroupSaveSuccess(`Imported ${group.name}.`);
   }
 
@@ -908,11 +1008,28 @@ function CreateAssessmentView({
   }
 
   function changeBlueprint(index: number, difficulty: DifficultyLevel) {
+    if (difficultyBlueprint[index] === difficulty) {
+      return;
+    }
     const nextBlueprint = difficultyBlueprint.map((item, itemIndex) =>
       itemIndex === index ? difficulty : item,
     );
     setDifficultyBlueprint(nextBlueprint);
-    onChange({ ...assessmentForm, difficulty_blueprint: nextBlueprint });
+    setQuestionSetupStep(2);
+    setActiveQuestionSetupStep(2);
+    setDeliveryConfigured(false);
+    setSelectedGroupId("");
+    if (selectedQuestionIds.length) {
+      onChangeQuestions([]);
+      setSelectionWarning(
+        "Difficulty requirements changed. Previous questions were cleared so every slot can be matched correctly.",
+      );
+    }
+    onChange({
+      ...assessmentForm,
+      difficulty_blueprint: nextBlueprint,
+      shuffle_questions: false,
+    });
   }
 
   function applyScoringPreset(
@@ -1129,7 +1246,9 @@ function CreateAssessmentView({
                     Per candidate {desiredQuestionCount}
                   </span>
                   <span className={questionSetReady ? "is-ready" : "is-needed"}>
-                    Delivery {assessmentForm.shuffle_questions ? "randomized" : "same set"}
+                    Delivery {deliveryConfigured
+                      ? assessmentForm.shuffle_questions ? "randomized" : "fixed set"
+                      : "not chosen"}
                   </span>
                 </div>
 
@@ -1144,91 +1263,164 @@ function CreateAssessmentView({
                     </div>
                   </div>
 
-                  <div className="question-set-mode-grid" role="tablist" aria-label="Question set source">
+                  <div className="question-setup-tabs" role="tablist" aria-label="Question selection setup">
                     {[
+                      { step: 1 as const, label: "Question count", meta: `${desiredQuestionCount} required` },
+                      { step: 2 as const, label: "Difficulties", meta: `${difficultyBlueprint.length} slots` },
                       {
-                        mode: "select-questions" as const,
-                        title: "Select Question",
-                        copy: "Choose individual questions.",
+                        step: 3 as const,
+                        label: "Delivery",
+                        meta: deliveryConfigured
+                          ? assessmentForm.shuffle_questions ? "Randomized" : "Fixed set"
+                          : "Choose mode",
                       },
-                      {
-                        mode: "select-groups" as const,
-                        title: "Select Groups",
-                        copy: "Use an existing group.",
-                      },
-                      {
-                        mode: "custom" as const,
-                        title: "Custom Group Composer",
-                        copy: "Compose and save a group.",
-                      },
-                    ].map((option) => (
-                      <button
-                        key={option.mode}
-                        type="button"
-                        className={questionSetMode === option.mode ? "is-active" : ""}
-                        onClick={() => {
-                          setQuestionSetMode(option.mode);
-                          setGroupSaveSuccess("");
-                          if (option.mode === "select-questions") {
-                            setSelectedGroupId("");
-                          }
-                        }}
-                      >
-                        <strong>{option.title}</strong>
-                        <span>{option.copy}</span>
-                      </button>
-                    ))}
+                      { step: 4 as const, label: "Select questions", meta: `${selectedQuestionIds.length} selected` },
+                    ].map((item) => {
+                      const complete = item.step < questionSetupStep || (item.step === 4 && questionSetReady);
+                      const available = item.step <= questionSetupStep;
+                      return (
+                        <button
+                          key={item.step}
+                          type="button"
+                          role="tab"
+                          aria-selected={item.step === activeQuestionSetupStep}
+                          disabled={!available}
+                          className={`${complete ? "is-complete" : "is-needed"} ${item.step === activeQuestionSetupStep ? "is-active" : ""}`}
+                          onClick={() => available && setActiveQuestionSetupStep(item.step)}
+                        >
+                          <span>{complete ? "✓" : item.step}</span>
+                          <strong>{item.label}</strong>
+                          <small>{complete ? "Completed" : item.meta}</small>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  <div className="assessment-inline-fields">
-                    <label className="field field-pro metric-field">
-                      <span>
-                        Questions per candidate {requiredMark}
-                      </span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={50}
-                        value={desiredQuestionCount}
-                        onChange={(event) => updateQuestionCount(Number(event.target.value))}
-                      />
-                    </label>
-                    <div className="question-delivery-toggle" role="group" aria-label="Question delivery mode">
-                      <button
-                        type="button"
-                        className={!assessmentForm.shuffle_questions ? "is-active" : ""}
-                        onClick={() => {
-                          const exactIds = selectedQuestionIds.slice(0, desiredQuestionCount);
-                          if (selectedQuestionIds.length > desiredQuestionCount) {
-                            onChangeQuestions(exactIds);
-                            setSelectionWarning(`Same-set mode keeps exactly ${desiredQuestionCount} questions.`);
-                          }
-                          onChange({
-                            ...assessmentForm,
-                            shuffle_questions: false,
-                          });
-                        }}
-                      >
-                        <strong>Same set</strong>
-                        <span>
-                          Every candidate gets the first {desiredQuestionCount} selected questions.
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className={assessmentForm.shuffle_questions ? "is-active" : ""}
-                        onClick={() =>
-                          onChange({
-                            ...assessmentForm,
-                            shuffle_questions: true,
-                          })
-                        }
-                      >
-                        <strong>Randomize set</strong>
-                        <span>Pick {desiredQuestionCount} questions from the full selected pool.</span>
-                      </button>
-                    </div>
-                  </div>
+                  <div className="question-setup-flow">
+                    <section className={`question-setup-card is-visible ${questionSetupStep > 1 ? "is-complete" : ""} ${activeQuestionSetupStep === 1 ? "is-current" : ""}`}>
+                      <div className="question-setup-card-heading">
+                        <span>1</span>
+                        <div>
+                          <strong>How many questions should each candidate receive?</strong>
+                          <p>This controls the number of difficulty slots and the final selection requirement.</p>
+                        </div>
+                      </div>
+                      <div className="question-count-control">
+                        <label className="field field-pro metric-field">
+                          <span>Questions per candidate {requiredMark}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={desiredQuestionCount}
+                            onChange={(event) => updateQuestionCount(Number(event.target.value))}
+                          />
+                        </label>
+                        <Button type="button" onClick={confirmQuestionCount}>
+                          Confirm count and continue
+                        </Button>
+                      </div>
+                    </section>
+
+                    {questionSetupStep >= 2 ? (
+                      <section className={`question-setup-card is-visible ${questionSetupStep > 2 ? "is-complete" : ""} ${activeQuestionSetupStep === 2 ? "is-current" : ""}`}>
+                        <div className="question-setup-card-heading">
+                          <span>2</span>
+                          <div>
+                            <strong>Choose the difficulty for every question slot</strong>
+                            <p>The order matters for a fixed set. A randomized pool must satisfy the same totals.</p>
+                          </div>
+                        </div>
+                        <div className="difficulty-slot-grid question-setup-difficulty-grid">
+                          {difficultyBlueprint.map((difficulty, index) => (
+                            <label key={`difficulty-${index}`}>
+                              <span>Question {index + 1} · {templateMarks[index]} marks</span>
+                              <select
+                                value={difficulty}
+                                onChange={(event) =>
+                                  changeBlueprint(index, event.target.value as DifficultyLevel)
+                                }
+                              >
+                                {QUESTION_DIFFICULTIES.map((item) => (
+                                  <option key={item} value={item}>{item}</option>
+                                ))}
+                              </select>
+                            </label>
+                          ))}
+                        </div>
+                        <div className="question-setup-card-actions">
+                          <Button type="button" onClick={confirmDifficultyBlueprint}>
+                            Confirm difficulties and continue
+                          </Button>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {questionSetupStep >= 3 ? (
+                      <section className={`question-setup-card is-visible ${questionSetupStep > 3 ? "is-complete" : ""} ${activeQuestionSetupStep === 3 ? "is-current" : ""}`}>
+                        <div className="question-setup-card-heading">
+                          <span>3</span>
+                          <div>
+                            <strong>How should questions be delivered?</strong>
+                            <p>Choose one mode before the eligible question bank is revealed.</p>
+                          </div>
+                        </div>
+                        <div className="question-delivery-toggle" role="group" aria-label="Question delivery mode">
+                          <button
+                            type="button"
+                            className={deliveryConfigured && !assessmentForm.shuffle_questions ? "is-active" : ""}
+                            onClick={() => configureDelivery(false)}
+                          >
+                            <strong>Fixed set</strong>
+                            <span>Every candidate receives the same {desiredQuestionCount} questions in blueprint order.</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={deliveryConfigured && assessmentForm.shuffle_questions ? "is-active" : ""}
+                            onClick={() => configureDelivery(true)}
+                          >
+                            <strong>Randomized pool</strong>
+                            <span>Each candidate receives {desiredQuestionCount} matching questions from a larger pool.</span>
+                          </button>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {questionSetupStep >= 4 ? (
+                      <section className={`question-setup-card question-selection-stage is-visible ${activeQuestionSetupStep === 4 ? "is-current" : ""}`}>
+                        <div className="question-setup-card-heading">
+                          <span>4</span>
+                          <div>
+                            <strong>Select only questions that match the configured template</strong>
+                            <p>Unavailable questions remain visible but disabled, so the selection rule is always clear.</p>
+                          </div>
+                        </div>
+
+                        <div className="question-set-mode-grid" role="tablist" aria-label="Question set source">
+                          {[
+                            { mode: "select-questions" as const, title: "Individual questions", copy: "Choose from validated questions." },
+                            { mode: "select-groups" as const, title: "Question groups", copy: "Apply a matching existing group." },
+                            { mode: "custom" as const, title: "Custom group", copy: "Select and save a reusable group." },
+                          ].map((option) => (
+                            <button
+                              key={option.mode}
+                              type="button"
+                              className={questionSetMode === option.mode ? "is-active" : ""}
+                              onClick={() => {
+                                if (questionSetMode !== option.mode && selectedQuestionIds.length) {
+                                  onChangeQuestions([]);
+                                  setSelectedGroupId("");
+                                  setSelectionWarning("Question source changed. Previous selections were cleared to avoid mixing selection methods.");
+                                }
+                                setQuestionSetMode(option.mode);
+                                setGroupSaveSuccess("");
+                              }}
+                            >
+                              <strong>{option.title}</strong>
+                              <span>{option.copy}</span>
+                            </button>
+                          ))}
+                        </div>
 
                   {questionSetMode === "custom" ? (
                     <div className="custom-group-composer-card">
@@ -1302,22 +1494,27 @@ function CreateAssessmentView({
                         {questionGroupsLoading ? (
                           <EmptyState label="Loading groups..." />
                         ) : questionGroups.length ? (
-                          questionGroups.map((group) => (
-                            <button
-                              key={group.id}
-                              type="button"
-                              className={selectedGroupId === group.id ? "is-selected" : ""}
-                              onClick={() => chooseGroup(group.id)}
-                            >
-                              <strong>{group.name}</strong>
-                              <span>{group.question_count} questions</span>
-                              <em>
-                                {group.difficulty_breakdown.easy} easy ·{" "}
-                                {group.difficulty_breakdown.medium} medium ·{" "}
-                                {group.difficulty_breakdown.hard} hard
-                              </em>
-                            </button>
-                          ))
+                          questionGroups.map((group) => {
+                            const matchesTemplate = groupMatchesConfiguredTemplate(group);
+                            return (
+                              <button
+                                key={group.id}
+                                type="button"
+                                disabled={!matchesTemplate}
+                                className={selectedGroupId === group.id ? "is-selected" : ""}
+                                onClick={() => chooseGroup(group.id)}
+                              >
+                                <strong>{group.name}</strong>
+                                <span>{group.question_count} questions</span>
+                                <em>
+                                  {group.difficulty_breakdown.easy} easy ·{" "}
+                                  {group.difficulty_breakdown.medium} medium ·{" "}
+                                  {group.difficulty_breakdown.hard} hard
+                                </em>
+                                {!matchesTemplate ? <small>Does not match this template</small> : null}
+                              </button>
+                            );
+                          })
                         ) : (
                           <EmptyState label="No active question groups available yet." />
                         )}
@@ -1393,35 +1590,6 @@ function CreateAssessmentView({
                     )}
 
                     <div className="questions-blueprint-and-selected">
-                      <div className="difficulty-blueprint">
-                        <div className="question-set-subhead">
-                          <strong>Difficulty blueprint</strong>
-                          <span>
-                            Set the expected shape for the {desiredQuestionCount} questions delivered in a
-                            test.
-                          </span>
-                        </div>
-                        <div className="difficulty-slot-grid">
-                          {difficultyBlueprint.map((difficulty, index) => (
-                            <label key={`difficulty-${index}`}>
-                              <span>Q{index + 1} · {templateMarks[index]} marks</span>
-                              <select
-                                value={difficulty}
-                                onChange={(event) =>
-                                  changeBlueprint(index, event.target.value as DifficultyLevel)
-                                }
-                              >
-                                {QUESTION_DIFFICULTIES.map((item) => (
-                                  <option key={item} value={item}>
-                                    {item}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
                       {selectedQuestionIds.length ? (
                         <div className="selected-question-order">
                           <div className="question-set-subhead">
@@ -1505,6 +1673,9 @@ function CreateAssessmentView({
                         </div>
                       ) : null}
                     </div>
+                  </div>
+                      </section>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -1859,12 +2030,10 @@ function AssessmentDetailView({
   evaluationBackfillError,
   evaluationBackfillResult,
   onBack,
-  onOpenTest,
   onArchive,
   onDeleteAssessment,
   onUpdateAssessment,
   onSaveQuestions,
-  onToggleQuestion,
   onUpdateQuestionSelection,
   onChangeSlot,
   onCreateSlot,
@@ -1905,12 +2074,10 @@ function AssessmentDetailView({
   evaluationBackfillError: string;
   evaluationBackfillResult: EvaluationBackfillResponse | null;
   onBack: () => void;
-  onOpenTest: (slotId: string) => void;
-  onArchive: () => void;
+  onArchive: () => Promise<void>;
   onDeleteAssessment: () => Promise<void>;
   onUpdateAssessment: (payload: Partial<AssessmentCreatePayload>) => Promise<void>;
   onSaveQuestions: () => Promise<void>;
-  onToggleQuestion: (questionId: string, checked: boolean) => void;
   onUpdateQuestionSelection: (
     updater: (
       current: Record<string, AssessmentQuestionAssignment>,
@@ -1933,8 +2100,11 @@ function AssessmentDetailView({
   const totalSubmitted = slots.reduce((sum, slot) => sum + slot.submitted_count, 0);
   const [showCreateTest, setShowCreateTest] = useState(false);
   const [detailMode, setDetailMode] = useState<AssessmentDetailMode>("tests");
+  const [pdfTrigger, setPdfTrigger] = useState(0);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"details" | "rules" | "danger">("details");
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"details" | "rules" | "delete">("details");
   const minimumSlotStart = nextAvailableTimeInput(
     slotForm.timezone_name,
     slotForm.timezone_offset_minutes,
@@ -1957,6 +2127,8 @@ function AssessmentDetailView({
     setDetailMode("tests");
     setShowCreateTest(false);
     setShowSettingsModal(false);
+    setShowDetailsModal(false);
+    setShowArchiveConfirm(false);
     setSettingsTab("details");
     setDeleteConfirmText("");
     setDetailSuccessMessage("");
@@ -2008,6 +2180,56 @@ function AssessmentDetailView({
     setDetailSuccessMessage("Question delivery settings saved successfully.");
   }
 
+  async function confirmArchiveToggle() {
+    setDetailSuccessMessage("");
+    await onArchive();
+    setShowArchiveConfirm(false);
+    setDetailSuccessMessage(
+      assessment.status === "archived"
+        ? "Assessment restored successfully."
+        : "Assessment archived successfully.",
+    );
+  }
+
+  const isArchived = assessment.status === "archived";
+  const archiveActionLabel = isArchived ? "Restore assessment" : "Archive assessment";
+  const ArchiveActionIcon = isArchived ? ArchiveRestore : Archive;
+  const detailsPanel = (
+    <div className="assessment-detail-list assessment-details-modal-list">
+      <div>
+        <span>Duration</span>
+        <strong>Configured per test</strong>
+      </div>
+      <div>
+        <span>Passing score</span>
+        <strong>{assessment.passing_score}%</strong>
+      </div>
+      <div>
+        <span>Scoring</span>
+        <strong>
+          {assessment.test_case_score_weight}/{assessment.coding_score_weight}/{assessment.ai_score_weight}
+        </strong>
+        <em>Test cases / coding / AI</em>
+      </div>
+      <div>
+        <span>Candidate policy</span>
+        <strong>
+          {assessment.allow_resume ? "Resume allowed" : "No resume"} ·{" "}
+          {assessment.shuffle_questions ? "Randomized set" : "Same set"}
+        </strong>
+      </div>
+      <div>
+        <span>Hidden feedback</span>
+        <strong>{assessment.hidden_feedback_mode}</strong>
+        <em>Unlimited checks, 5s cooldown</em>
+      </div>
+      <div>
+        <span>Languages</span>
+        <strong>{assessment.supported_languages.join(", ")}</strong>
+      </div>
+    </div>
+  );
+
   return (
     <section className="assessment-drilldown">
       <div className="assessment-breadcrumb">
@@ -2018,99 +2240,158 @@ function AssessmentDetailView({
         <strong>{assessment.title}</strong>
       </div>
 
-      <Card className="assessment-panel assessment-command-center">
-        <div className="assessment-command-main">
-          <div>
-            <span className="panel-eyebrow">Assessment Template</span>
-            <h2>{assessment.title}</h2>
-            <p>{assessment.description || "No description added yet."}</p>
-          </div>
-          <div className="assessment-row-actions">
-            <StatusBadge value={assessment.status} />
-            <Button
-              type="button"
-              variant="secondary"
-              className="icon-only-button"
-              onClick={() => {
-                setSettingsTab("details");
-                setShowSettingsModal(true);
-              }}
-              title="Assessment settings"
-            >
-              <Settings size={18} />
-              <span className="sr-only">Assessment settings</span>
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className="icon-only-button"
-              onClick={onArchive}
-              disabled={publishPending || !canArchive}
-              title="Archive assessment"
-            >
-              <Archive size={18} />
-              <span className="sr-only">Archive assessment</span>
-            </Button>
-          </div>
+      <Card className="assessment-panel assessment-command-center assessment-command-center-compact">
+        <div className="assessment-command-title">
+          <h2>{assessment.title}</h2>
+          <p>{assessment.description || "No description added yet."}</p>
         </div>
 
-        <div className="assessment-hero-metrics assessment-command-metrics">
-          <span>
+        <div className="assessment-command-metrics">
+          <div className="metric-item">
             <strong>{slots.length}</strong>
-            Tests
-          </span>
-          <span>
+            <span>Tests</span>
+          </div>
+          <div className="metric-divider" />
+          <div className="metric-item">
             <strong>{totalCandidates}</strong>
-            Candidates
-          </span>
-          <span>
+            <span>Candidates</span>
+          </div>
+          <div className="metric-divider" />
+          <div className="metric-item">
             <strong>{totalSubmitted}</strong>
-            Submitted
-          </span>
-          <span>
+            <span>Submitted</span>
+          </div>
+          <div className="metric-divider" />
+          <div className="metric-item">
             <strong>
               {assessment.question_count_per_candidate || assessment.question_count}
             </strong>
-            Per candidate
-          </span>
+            <span>Per candidate</span>
+          </div>
         </div>
 
-        <div className="assessment-detail-list">
-          <div>
-            <span>Duration</span>
-            <strong>Configured per test</strong>
-          </div>
-          <div>
-            <span>Passing score</span>
-            <strong>{assessment.passing_score}%</strong>
-          </div>
-          <div>
-            <span>Scoring</span>
-            <strong>
-              {assessment.test_case_score_weight}/{assessment.coding_score_weight}/{assessment.ai_score_weight}
-            </strong>
-            <em>Test cases / coding / AI</em>
-          </div>
-          <div>
-            <span>Candidate policy</span>
-            <strong>
-              {assessment.allow_resume ? "Resume allowed" : "No resume"} ·{" "}
-              {assessment.shuffle_questions ? "Randomized set" : "Same set"}
-            </strong>
-          </div>
-          <div>
-            <span>Hidden feedback</span>
-            <strong>{assessment.hidden_feedback_mode}</strong>
-            <em>
-              Unlimited checks, 5s cooldown
-            </em>
-          </div>
-          <div>
-            <span>Languages</span>
-            <strong>{assessment.supported_languages.join(", ")}</strong>
-          </div>
+        <div className="assessment-row-actions">
+          <StatusBadge value={assessment.status} />
+          {detailMode === "analytics" && (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={evaluationBackfillPending}
+                onClick={() => void onBackfillEvaluations()}
+              >
+                <Activity size={16} aria-hidden="true" />
+                {evaluationBackfillPending ? "Evaluating..." : "Evaluate previous"}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setPdfTrigger((prev) => prev + 1)}
+              >
+                <Download size={16} aria-hidden="true" />
+                Download Report
+              </Button>
+            </>
+          )}
+          <Button
+            type="button"
+            variant="secondary"
+            className="icon-only-button"
+            onClick={() => setShowDetailsModal(true)}
+            title="Assessment details"
+          >
+            <Info size={18} />
+            <span className="sr-only">Assessment details</span>
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="icon-only-button"
+            onClick={() => {
+              setSettingsTab("details");
+              setShowSettingsModal(true);
+            }}
+            title="Assessment settings"
+          >
+            <Settings size={18} />
+            <span className="sr-only">Assessment settings</span>
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="icon-only-button"
+            onClick={() => setShowArchiveConfirm(true)}
+            disabled={publishPending || !canArchive || assessmentUpdatePending}
+            title={archiveActionLabel}
+          >
+            <ArchiveActionIcon size={18} />
+            <span className="sr-only">{archiveActionLabel}</span>
+          </Button>
         </div>
       </Card>
+
+      {showDetailsModal ? (
+        <div className="dialog-backdrop" onClick={() => setShowDetailsModal(false)}>
+          <Card
+            className="assessment-info-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="assessment-info-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-modal-header">
+              <div>
+                <span>Details</span>
+                <h2 id="assessment-info-title">Assessment information</h2>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setShowDetailsModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            {detailsPanel}
+          </Card>
+        </div>
+      ) : null}
+
+      {showArchiveConfirm ? (
+        <div className="dialog-backdrop" onClick={() => setShowArchiveConfirm(false)}>
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="archive-confirm-title">
+              {isArchived ? "Restore assessment?" : "Archive assessment?"}
+            </h3>
+            <p>
+              {isArchived
+                ? "This assessment will be restored to the available list."
+                : "This assessment will be retained but marked as archived."}
+            </p>
+            <div className="confirm-dialog-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowArchiveConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void confirmArchiveToggle()}
+                disabled={assessmentUpdatePending}
+              >
+                {assessmentUpdatePending ? "Saving..." : archiveActionLabel}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="assessment-detail-tabs" role="tablist" aria-label="Assessment sections">
         <button
@@ -2121,10 +2402,7 @@ function AssessmentDetailView({
           onClick={() => setDetailMode("tests")}
         >
           <ListChecks size={18} aria-hidden="true" />
-          <span>
-            <strong>Tests</strong>
-            <small>{slots.length} scheduled batches</small>
-          </span>
+          <strong>Tests</strong>
         </button>
         <button
           type="button"
@@ -2134,23 +2412,17 @@ function AssessmentDetailView({
           onClick={() => setDetailMode("questions")}
         >
           <Code2 size={18} aria-hidden="true" />
-          <span>
-            <strong>Questions</strong>
-            <small>{assessment.question_count} configured</small>
-          </span>
+          <strong>Questions</strong>
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={detailMode === "evaluation"}
-          className={detailMode === "evaluation" ? "is-active" : ""}
-          onClick={() => setDetailMode("evaluation")}
+          aria-selected={detailMode === "analytics"}
+          className={detailMode === "analytics" ? "is-active" : ""}
+          onClick={() => setDetailMode("analytics")}
         >
           <BarChart3 size={18} aria-hidden="true" />
-          <span>
-            <strong>Evaluations</strong>
-            <small>Analytics and reports</small>
-          </span>
+          <strong>Analytics</strong>
         </button>
       </div>
 
@@ -2187,7 +2459,7 @@ function AssessmentDetailView({
               {[
                 { id: "details", label: "Details" },
                 { id: "rules", label: "Rules" },
-                { id: "danger", label: "Danger" },
+                { id: "delete", label: "Delete" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -2342,29 +2614,45 @@ function AssessmentDetailView({
                       <option value="none">No proctoring</option>
                     </select>
                   </label>
-                  <label className="field">
+                  <label className="field field-pro">
                     <span>Supported languages</span>
-                    <div className="assessment-checkbox-grid">
-                      {ASSESSMENT_LANGUAGES.map((language) => (
-                        <label key={language}>
-                          <input
-                            type="checkbox"
-                            checked={assessmentEditForm.supported_languages.includes(language)}
-                            onChange={(event) => {
-                              const nextLanguages = event.target.checked
-                                ? [...assessmentEditForm.supported_languages, language]
-                                : assessmentEditForm.supported_languages.filter(
-                                  (item) => item !== language,
-                                );
-                              setAssessmentEditForm({
-                                ...assessmentEditForm,
-                                supported_languages: Array.from(new Set(nextLanguages)),
-                              });
-                            }}
-                          />
-                          {language}
-                        </label>
-                      ))}
+                    <div className="assessment-language-grid">
+                      {ASSESSMENT_LANGUAGES.map((language) => {
+                        const selected =
+                          assessmentEditForm.supported_languages.includes(language);
+                        return (
+                          <label
+                            key={language}
+                            className={`language-option ${selected ? "is-selected" : ""}`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="language-option-input"
+                              checked={selected}
+                              onChange={(event) => {
+                                const nextLanguages = event.target.checked
+                                  ? [...assessmentEditForm.supported_languages, language]
+                                  : assessmentEditForm.supported_languages.filter(
+                                    (item) => item !== language,
+                                  );
+                                setAssessmentEditForm({
+                                  ...assessmentEditForm,
+                                  supported_languages: Array.from(new Set(nextLanguages)),
+                                });
+                              }}
+                            />
+                            <span className="language-option-icon">
+                              <Code2 size={15} />
+                            </span>
+                            <span className="language-option-name">
+                              {LANGUAGE_LABELS[language]}
+                            </span>
+                            <span className="language-option-check" aria-hidden="true">
+                              <Check size={13} />
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </label>
                 </div>
@@ -2412,7 +2700,7 @@ function AssessmentDetailView({
               </div>
             ) : null}
 
-            {settingsTab === "danger" ? (
+            {settingsTab === "delete" ? (
               <div className="danger-settings-panel">
                 <div>
                   <Trash2 size={18} aria-hidden="true" />
@@ -2439,7 +2727,7 @@ function AssessmentDetailView({
               </div>
             ) : null}
 
-            {settingsTab !== "danger" ? (
+            {settingsTab !== "delete" ? (
               <div className="settings-modal-actions">
                 <Button
                   type="button"
@@ -2465,12 +2753,7 @@ function AssessmentDetailView({
         {detailMode === "tests" ? (
           <>
             <Card className="assessment-panel assessment-panel-wide">
-              <div className="assessment-table-toolbar">
-                <div>
-                  <span className="panel-eyebrow">Tests</span>
-                  <h2>Tests in this assessment</h2>
-                  <p>Each test can have a different schedule and candidate batch.</p>
-                </div>
+              <div className="assessment-tests-toolbar">
                 <Button
                   type="button"
                   onClick={() => setShowCreateTest(true)}
@@ -2487,26 +2770,20 @@ function AssessmentDetailView({
                       (slot.submitted_count / Math.max(slot.candidate_count, 1)) * 100,
                     );
                     return (
-                      <button
+                      <Link
                         key={slot.id}
-                        type="button"
                         className="test-summary-card"
-                        onClick={() => onOpenTest(slot.id)}
+                        to={assessmentTestPath(assessment.id, slot.id, assessment.title, slot.title)}
                       >
-                        <div className="test-card-topline">
-                          <span className="test-card-icon">
-                            <Clock3 size={18} aria-hidden="true" />
+                        <span className="test-card-icon">
+                          <Clock3 size={18} aria-hidden="true" />
+                        </span>
+                        <div className="test-card-primary">
+                          <span className="test-card-kind">Test</span>
+                          <strong>{slot.title}</strong>
+                          <span>
+                            {formatDateTime(slot.start_at)} to {formatDateTime(slot.end_at)}
                           </span>
-                          <StatusBadge value={slot.effective_status} />
-                        </div>
-                        <div className="test-card-title-row">
-                          <div>
-                            <strong>{slot.title}</strong>
-                            <span>
-                              {formatDateTime(slot.start_at)} to {formatDateTime(slot.end_at)}
-                            </span>
-                          </div>
-                          <HealthDot status={slot.effective_status} />
                         </div>
                         <div className="test-card-metrics">
                           <span>
@@ -2517,24 +2794,29 @@ function AssessmentDetailView({
                             <strong>{slot.submitted_count}</strong>
                             Submitted
                           </span>
-                          <span>
+                          <span className="test-card-completion">
                             <strong>{submittedPercent}%</strong>
                             Completion
+                            <i className="test-card-progress" aria-hidden="true">
+                              <b style={{ width: `${submittedPercent}%` }} />
+                            </i>
                           </span>
                         </div>
-                        <div className="test-card-progress" aria-hidden="true">
-                          <i style={{ width: `${submittedPercent}%` }} />
-                        </div>
-                        <div className="test-card-footer">
-                          <span>
-                            <BadgeCheck size={15} aria-hidden="true" />
+                        <div className="test-card-status">
+                          <div className="status-with-dot">
+                            <HealthDot status={slot.effective_status} />
+                            <StatusBadge value={slot.effective_status} />
+                          </div>
+                          <small>
                             {slot.status === slot.effective_status
-                              ? "Schedule status is current"
+                              ? "Schedule current"
                               : `Configured as ${slot.status}`}
-                          </span>
-                          <strong>Open Test</strong>
+                          </small>
                         </div>
-                      </button>
+                        <span className="test-card-open" aria-hidden="true">
+                          <ChevronRight size={20} />
+                        </span>
+                      </Link>
                     );
                   })}
                 </div>
@@ -2717,7 +2999,6 @@ function AssessmentDetailView({
             assessmentUpdatePending={assessmentUpdatePending}
             error={questionError}
             publishError={publishError}
-            onToggle={onToggleQuestion}
             onSave={saveQuestionSet}
             onUpdateAssessment={updateQuestionSetDelivery}
             onUpdateSelection={onUpdateQuestionSelection}
@@ -2730,7 +3011,7 @@ function AssessmentDetailView({
             backfillError={evaluationBackfillError}
             backfillResult={evaluationBackfillResult}
             onBackfill={onBackfillEvaluations}
-            onOpenTest={onOpenTest}
+            pdfTrigger={pdfTrigger}
           />
         )}
       </section>
@@ -2744,10 +3025,8 @@ function QuestionSetPanel({
   questionBank,
   selectedQuestions,
   pending,
-  assessmentUpdatePending,
   error,
   publishError,
-  onToggle,
   onSave,
   onUpdateAssessment,
   onUpdateSelection,
@@ -2758,13 +3037,13 @@ function QuestionSetPanel({
     title: string;
     difficulty: string;
     tags: string[];
+    supported_languages?: string[];
   }>;
   selectedQuestions: Record<string, AssessmentQuestionAssignment>;
   pending: boolean;
   assessmentUpdatePending: boolean;
   error: string;
   publishError: string;
-  onToggle: (questionId: string, checked: boolean) => void;
   onSave: () => Promise<void>;
   onUpdateAssessment: (payload: Partial<AssessmentCreatePayload>) => Promise<void>;
   onUpdateSelection: (
@@ -2773,16 +3052,60 @@ function QuestionSetPanel({
     ) => Record<string, AssessmentQuestionAssignment>,
   ) => void;
 }) {
-  const navigate = useNavigate();
-  const [showQuestionBankPicker, setShowQuestionBankPicker] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [panelWarning, setPanelWarning] = useState("");
   const [hasTemplateDraft, setHasTemplateDraft] = useState(false);
+  const [templateEditorStep, setTemplateEditorStep] = useState<QuestionSetupStep>(1);
   const [templateDraft, setTemplateDraft] = useState<DifficultyLevel[]>(
     assessment.difficulty_blueprint?.length
       ? assessment.difficulty_blueprint
       : createQuestionBlueprint(assessment.question_count_per_candidate || 1),
   );
+  const [templateShuffleDraft, setTemplateShuffleDraft] = useState(assessment.shuffle_questions);
+  const [templateCountDraft, setTemplateCountDraft] = useState(assessment.question_count_per_candidate || 1);
+  const [templateQuestionsDraft, setTemplateQuestionsDraft] = useState<string[]>([]);
+
+  function openEditTemplate() {
+    setTemplateDraft(
+      assessment.difficulty_blueprint?.length
+        ? [...assessment.difficulty_blueprint]
+        : createQuestionBlueprint(assessment.question_count_per_candidate || 1)
+    );
+    setTemplateCountDraft(assessment.question_count_per_candidate || 1);
+    setTemplateShuffleDraft(assessment.shuffle_questions);
+
+    const initialQuestions: string[] = [];
+    const currentSelected = Object.values(selectedQuestions)
+      .sort((left, right) => left.question_order - right.question_order);
+
+    const activeCount = assessment.question_count_per_candidate || 1;
+    for (let i = 0; i < activeCount; i++) {
+      initialQuestions.push(currentSelected[i]?.question_id || "");
+    }
+    setTemplateQuestionsDraft(initialQuestions);
+
+    setTemplateEditorStep(1);
+    setShowTemplateDialog(true);
+  }
+
+  function updateTemplateCount(newCount: number) {
+    const count = Math.max(1, Math.min(50, newCount));
+    setTemplateCountDraft(count);
+    setTemplateDraft((current) => {
+      if (current.length === count) return current;
+      if (current.length < count) {
+        return [...current, ...Array<DifficultyLevel>(count - current.length).fill("easy")];
+      }
+      return current.slice(0, count);
+    });
+    setTemplateQuestionsDraft((current) => {
+      if (current.length === count) return current;
+      if (current.length < count) {
+        return [...current, ...Array<string>(count - current.length).fill("")];
+      }
+      return current.slice(0, count);
+    });
+  }
 
   async function saveQuestionsAndClose() {
     if (!selectionReady) {
@@ -2795,30 +3118,12 @@ function QuestionSetPanel({
       await onUpdateAssessment({
         difficulty_blueprint: templateDraft,
         question_count_per_candidate: templateDraft.length,
+        shuffle_questions: templateShuffleDraft,
       });
     }
     await onSave();
     setHasTemplateDraft(false);
-    setShowQuestionBankPicker(false);
     setShowTemplateDialog(false);
-  }
-
-  async function toggleRandomizedSet() {
-    if (assessment.shuffle_questions) {
-      const requiredCount = assessment.question_count_per_candidate;
-      const blueprint = assessment.difficulty_blueprint || [];
-      const currentDifficulties = selectedRows.map((row) => row.difficulty);
-      if (
-        selectedRows.length !== requiredCount ||
-        blueprint.some((difficulty, index) => currentDifficulties[index] !== difficulty)
-      ) {
-        setPanelWarning(
-          `Same-set mode requires exactly ${requiredCount} questions in the current template order.`,
-        );
-        return;
-      }
-    }
-    await onUpdateAssessment({ shuffle_questions: !assessment.shuffle_questions });
   }
 
   const selectedRows = Object.values(selectedQuestions)
@@ -2864,15 +3169,10 @@ function QuestionSetPanel({
   );
   const orderedSelectionMatches = selectedRows.length === activeBlueprint.length &&
     selectedRows.every((row, index) => row.difficulty === activeBlueprint[index]);
-  const selectionReady = assessment.shuffle_questions
+  const activeShuffleQuestions = hasTemplateDraft ? templateShuffleDraft : assessment.shuffle_questions;
+  const selectionReady = activeShuffleQuestions
     ? selectedRows.length >= activeBlueprint.length && minimumRequirementsMet && allSelectedInTemplate
     : orderedSelectionMatches;
-  const nextRequiredDifficulty = assessment.shuffle_questions
-    ? null
-    : activeBlueprint[selectedRows.length];
-  const availableBankQuestions = questionBank.filter(
-    (question) => !selectedQuestions[question.id] && activeBlueprint.includes(question.difficulty as DifficultyLevel),
-  );
   const difficultySummary = selectedRows.reduce<Record<string, number>>(
     (summary, row) => ({
       ...summary,
@@ -2883,6 +3183,43 @@ function QuestionSetPanel({
   const templateLabel = activeBlueprint
     .map((difficulty, index) => `Q${index + 1} ${difficulty} (${templateMarks[index]} marks)`)
     .join(" · ");
+  const draftTemplateMarks = calculateQuestionTemplateMarks(templateDraft);
+  const draftRequiredCounts = templateDraft.reduce<Record<DifficultyLevel, number>>(
+    (counts, difficulty) => ({ ...counts, [difficulty]: counts[difficulty] + 1 }),
+    { easy: 0, medium: 0, hard: 0 },
+  );
+  const draftSelectedRows = templateQuestionsDraft.map((qId) => {
+    const q = questionBank.find((item) => item.id === qId);
+    return {
+      difficulty: q?.difficulty || "unknown",
+    };
+  });
+
+  const draftSelectedCounts = draftSelectedRows.reduce<Record<DifficultyLevel, number>>(
+    (counts, row) => {
+      if (!QUESTION_DIFFICULTIES.includes(row.difficulty as DifficultyLevel)) return counts;
+      const difficulty = row.difficulty as DifficultyLevel;
+      return { ...counts, [difficulty]: counts[difficulty] + 1 };
+    },
+    { easy: 0, medium: 0, hard: 0 },
+  );
+  const draftMinimumRequirementsMet = QUESTION_DIFFICULTIES.every(
+    (difficulty) => draftSelectedCounts[difficulty] >= draftRequiredCounts[difficulty],
+  );
+  const draftAllSelectedInTemplate = draftSelectedRows.every((row) =>
+    templateDraft.includes(row.difficulty as DifficultyLevel),
+  );
+  const draftOrderedSelectionMatches = draftSelectedRows.length === templateDraft.length &&
+    draftSelectedRows.every((row, index) => row.difficulty === templateDraft[index]);
+  const draftSelectionReady = templateShuffleDraft
+    ? draftSelectedRows.length >= templateDraft.length && draftMinimumRequirementsMet && draftAllSelectedInTemplate
+    : draftOrderedSelectionMatches;
+
+  const allSlotsHaveQuestions = templateQuestionsDraft.length === templateCountDraft &&
+    templateQuestionsDraft.every((qId) => qId !== "");
+  const draftTemplateLabel = templateDraft
+    .map((difficulty, index) => `Q${index + 1} ${difficulty} (${draftTemplateMarks[index]} marks)`)
+    .join(" · ");
 
   function marksForDifficulty(difficulty: string) {
     const values = templateMarks.filter((_, index) => activeBlueprint[index] === difficulty);
@@ -2891,23 +3228,7 @@ function QuestionSetPanel({
     return unique.length === 1 ? `${unique[0]} marks` : `${Math.min(...unique)}-${Math.max(...unique)} marks`;
   }
 
-  function openQuestionEditor(questionId: string) {
-    navigate(
-      `/recruiter/question-management/new?questionId=${encodeURIComponent(questionId)}`,
-    );
-  }
 
-  function addEligibleQuestion(questionId: string) {
-    onUpdateSelection((current) => ({
-      ...current,
-      [questionId]: {
-        question_id: questionId,
-        question_order: Object.keys(current).length + 1,
-        marks: 1,
-        is_mandatory: true,
-      },
-    }));
-  }
 
   return (
     <Card className="assessment-panel question-management-panel">
@@ -2928,49 +3249,10 @@ function QuestionSetPanel({
           <Button
             type="button"
             variant="secondary"
-            onClick={() => setShowTemplateDialog(true)}
+            onClick={openEditTemplate}
           >
-            Question Template
+            Edit Template
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setShowQuestionBankPicker((current) => !current)}
-          >
-            {showQuestionBankPicker ? "Hide Question Bank" : "Add More From Question Bank"}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={assessmentUpdatePending}
-            onClick={() => void toggleRandomizedSet()}
-          >
-            {assessment.shuffle_questions ? "Use Same Set" : "Randomize Set"}
-          </Button>
-        </div>
-      </div>
-
-      <div className="question-policy-grid">
-        <div>
-          <span>Delivery rule</span>
-          <strong>{templateLabel}</strong>
-        </div>
-        <div>
-          <span>Candidate set</span>
-          <strong>{assessment.shuffle_questions ? "Randomized per candidate" : "Same for everyone"}</strong>
-        </div>
-        <div>
-          <span>Assessment total</span>
-          <strong>100 marks</strong>
-          <em>Fixed by the question template</em>
-        </div>
-        <div>
-          <span>Difficulty mix</span>
-          <strong>
-            {Object.entries(difficultySummary)
-              .map(([difficulty, count]) => `${count} ${difficulty}`)
-              .join(" · ") || "Not selected"}
-          </strong>
         </div>
       </div>
 
@@ -2979,10 +3261,33 @@ function QuestionSetPanel({
           <span className="panel-eyebrow">Selection requirements</span>
           <strong>{selectionReady ? "Template requirements complete" : "Select the minimum required questions"}</strong>
           <p>
-            {assessment.shuffle_questions
+            {activeShuffleQuestions
               ? "You may add extra questions for randomization, but each difficulty must meet its template minimum."
               : "Add questions in template order. Only a question matching the next slot can be selected."}
           </p>
+
+          <div className="template-requirements-meta">
+            <div className="meta-item">
+              <span>Delivery rule</span>
+              <strong>{templateLabel}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Candidate set</span>
+              <strong>{activeShuffleQuestions ? "Randomized per candidate" : "Same for everyone"}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Assessment total</span>
+              <strong>100 marks</strong>
+            </div>
+            <div className="meta-item">
+              <span>Difficulty mix</span>
+              <strong>
+                {Object.entries(difficultySummary)
+                  .map(([difficulty, count]) => `${count} ${difficulty}`)
+                  .join(" · ") || "None selected"}
+              </strong>
+            </div>
+          </div>
         </div>
         <div className="template-quota-grid">
           {QUESTION_DIFFICULTIES.filter((difficulty) => requiredCounts[difficulty] > 0).map((difficulty) => {
@@ -3014,23 +3319,36 @@ function QuestionSetPanel({
                 {row.selection.question_order}
               </div>
               <div className="selected-question-main">
-                <button
-                  type="button"
-                  className="question-title-link"
-                  onClick={() => openQuestionEditor(row.selection.question_id)}
-                >
+                <strong className="question-title-static" style={{ fontSize: "15px", color: "#0f172a" }}>
                   {row.title}
-                </button>
-                <div className="selected-question-tags">
-                  <span className={`difficulty-chip difficulty-${row.difficulty}`}>
-                    {row.difficulty}
-                  </span>
-                  {row.tags.slice(0, 3).map((tag) => (
-                    <span key={tag}>{tag}</span>
-                  ))}
-                  {row.supportedLanguages.slice(0, 3).map((language) => (
-                    <span key={language}>{language}</span>
-                  ))}
+                </strong>
+                <div className="selected-question-metadata">
+                  <div className="meta-group">
+                    <span className="meta-label">Difficulty:</span>
+                    <span className={`difficulty-chip difficulty-${row.difficulty}`}>
+                      {row.difficulty}
+                    </span>
+                  </div>
+                  {row.tags.length > 0 && (
+                    <div className="meta-group">
+                      <span className="meta-label">Tags:</span>
+                      <div className="meta-pills">
+                        {row.tags.slice(0, 3).map((tag) => (
+                          <span key={tag} className="tag-pill">{tag}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {row.supportedLanguages.length > 0 && (
+                    <div className="meta-group">
+                      <span className="meta-label">Languages:</span>
+                      <div className="meta-pills">
+                        {row.supportedLanguages.slice(0, 5).map((language) => (
+                          <span key={language} className="lang-pill">{language}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="assessment-inline-fields">
@@ -3040,15 +3358,7 @@ function QuestionSetPanel({
                     type="number"
                     min={1}
                     value={row.selection.question_order}
-                    onChange={(event) =>
-                      onUpdateSelection((current) => ({
-                        ...current,
-                        [row.selection.question_id]: {
-                          ...current[row.selection.question_id],
-                          question_order: Number(event.target.value),
-                        },
-                      }))
-                    }
+                    disabled
                   />
                 </label>
                 <label className="field">
@@ -3060,15 +3370,6 @@ function QuestionSetPanel({
                   </strong>
                 </label>
               </div>
-              <div className="selected-question-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => onToggle(row.selection.question_id, false)}
-                >
-                  Remove
-                </Button>
-              </div>
             </div>
           ))
         ) : (
@@ -3076,44 +3377,6 @@ function QuestionSetPanel({
         )}
       </div>
 
-      {showQuestionBankPicker ? (
-        <div className="question-bank-picker">
-          <div className="assessment-table-toolbar">
-            <div>
-              <span className="panel-eyebrow">Question Bank</span>
-              <h2>{nextRequiredDifficulty ? `Choose a ${nextRequiredDifficulty} question next` : "Add eligible questions"}</h2>
-              <p>Only difficulties included in the active template are shown.</p>
-            </div>
-          </div>
-          {availableBankQuestions.length ? (
-            <div className="question-bank-card-grid">
-              {availableBankQuestions.map((question) => (
-                <div key={question.id} className="question-bank-card">
-                  <div>
-                    <strong>{question.title}</strong>
-                    <span>
-                      {question.difficulty}
-                      {question.tags.length ? ` · ${question.tags.slice(0, 3).join(", ")}` : ""}
-                    </span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={Boolean(nextRequiredDifficulty && question.difficulty !== nextRequiredDifficulty)}
-                    onClick={() => addEligibleQuestion(question.id)}
-                  >
-                    {nextRequiredDifficulty && question.difficulty !== nextRequiredDifficulty
-                      ? `Need ${nextRequiredDifficulty}`
-                      : "Add Question"}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState label="Every available question is already selected for this assessment." />
-          )}
-        </div>
-      ) : null}
 
       <div className="assessment-actions-row">
         <Button
@@ -3132,43 +3395,217 @@ function QuestionSetPanel({
           <div className="question-template-modal" role="dialog" aria-modal="true">
             <div className="panel-heading">
               <div>
-                <span>Question Template</span>
-                <h2>Question delivery</h2>
+                <span>Assessment Template</span>
+                <h2>Edit question template</h2>
+              </div>
+              <div className="assessment-row-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setShowTemplateDialog(false);
+                  }}
+                >
+                  Close
+                </Button>
               </div>
             </div>
-            <div className="difficulty-blueprint">
-              <div className="question-set-subhead">
-                <strong>Current template</strong>
-                <span>{templateLabel}</span>
-              </div>
-              <div className="difficulty-slot-grid">
-                {templateDraft.map((difficulty, index) => (
-                  <label key={`edit-template-${index}`}>
-                    <span>Q{index + 1} · {calculateQuestionTemplateMarks(templateDraft)[index]} marks</span>
-                    <select
-                      value={difficulty}
-                      onChange={(event) =>
-                        setTemplateDraft((current) => current.map((item, itemIndex) =>
-                          itemIndex === index ? event.target.value as DifficultyLevel : item,
-                        ))
-                      }
-                    >
-                      {QUESTION_DIFFICULTIES.map((item) => <option key={item} value={item}>{item}</option>)}
-                    </select>
+
+            <div className="question-setup-tabs question-template-editor-tabs" role="tablist" aria-label="Template editor steps">
+              {[
+                { step: 1 as const, label: "Question count", meta: `${templateCountDraft} required`, complete: templateDraft.length === templateCountDraft },
+                { step: 2 as const, label: "Difficulties", meta: `${templateDraft.length} slots`, complete: templateDraft.length === templateCountDraft },
+                { step: 3 as const, label: "Delivery", meta: templateShuffleDraft ? "Randomized" : "Fixed set", complete: true },
+                { step: 4 as const, label: "Pool check", meta: `${selectedRows.length} selected`, complete: draftSelectionReady },
+              ].map((item) => (
+                <button
+                  key={item.step}
+                  type="button"
+                  role="tab"
+                  aria-selected={templateEditorStep === item.step}
+                  className={`${item.complete ? "is-complete" : "is-needed"} ${templateEditorStep === item.step ? "is-active" : ""}`}
+                  onClick={() => setTemplateEditorStep(item.step)}
+                >
+                  <span>{item.complete ? "✓" : item.step}</span>
+                  <strong>{item.label}</strong>
+                  <small>{item.complete ? "Ready" : item.meta}</small>
+                </button>
+              ))}
+            </div>
+
+            <div className="question-setup-flow question-template-editor-flow">
+              <section className={`question-setup-card is-visible ${templateEditorStep === 1 ? "is-current" : ""} ${templateDraft.length === templateCountDraft ? "is-complete" : ""}`}>
+                <div className="question-setup-card-heading">
+                  <span>1</span>
+                  <div>
+                    <strong>How many questions should each candidate receive?</strong>
+                    <p>This rebuilds the editable difficulty slots and keeps the assessment requirement clear.</p>
+                  </div>
+                </div>
+                <div className="question-count-control">
+                  <label className="field field-pro metric-field">
+                    <span>Questions per candidate</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={templateCountDraft}
+                      onChange={(event) => updateTemplateCount(Number(event.target.value))}
+                    />
                   </label>
-                ))}
-              </div>
+                  <Button type="button" onClick={() => setTemplateEditorStep(2)}>
+                    Continue to difficulties
+                  </Button>
+                </div>
+              </section>
+
+              <section className={`question-setup-card is-visible ${templateEditorStep === 2 ? "is-current" : ""} ${templateDraft.length === templateCountDraft ? "is-complete" : ""}`}>
+                <div className="question-setup-card-heading">
+                  <span>2</span>
+                  <div>
+                    <strong>Choose the difficulty for every question slot</strong>
+                    <p>Marks are calculated automatically from difficulty weightage: easy 1, medium 2, hard 3.</p>
+                  </div>
+                </div>
+                <div className="difficulty-slot-grid question-setup-difficulty-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                  {templateDraft.map((difficulty, index) => (
+                    <div key={`edit-template-${index}`} className="difficulty-slot-card" style={{ display: "grid", gap: "8px", padding: "12px", background: "#ffffff", border: "1px solid #dbe4f0", borderRadius: "12px" }}>
+                      <label style={{ display: "grid", gap: "4px" }}>
+                        <span style={{ color: "#64748b", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Slot {index + 1} Difficulty · {draftTemplateMarks[index]} marks</span>
+                        <select
+                          value={difficulty}
+                          onChange={(event) => {
+                            const newDifficulty = event.target.value as DifficultyLevel;
+                            setTemplateDraft((current) => current.map((item, itemIndex) =>
+                              itemIndex === index ? newDifficulty : item,
+                            ));
+                            setTemplateQuestionsDraft((current) => current.map((qId, itemIndex) =>
+                              itemIndex === index ? "" : qId
+                            ));
+                          }}
+                          style={{ background: "#ffffff", border: "1px solid #dbe4f0", borderRadius: "8px", minHeight: "34px", padding: "0 8px", textTransform: "capitalize" }}
+                        >
+                          {QUESTION_DIFFICULTIES.map((item) => <option key={item} value={item}>{item}</option>)}
+                        </select>
+                      </label>
+                      <label style={{ display: "grid", gap: "4px" }}>
+                        <span style={{ color: "#64748b", fontSize: "11px", fontWeight: 900, textTransform: "uppercase" }}>Assigned Question</span>
+                        <select
+                          value={templateQuestionsDraft[index] || ""}
+                          onChange={(event) => {
+                            const val = event.target.value;
+                            setTemplateQuestionsDraft((current) => current.map((qId, itemIndex) =>
+                              itemIndex === index ? val : qId
+                            ));
+                          }}
+                          style={{ background: "#ffffff", border: "1px solid #dbe4f0", borderRadius: "8px", minHeight: "34px", padding: "0 8px" }}
+                        >
+                          <option value="">-- Select Question --</option>
+                          {questionBank
+                            .filter((q) => q.difficulty === difficulty)
+                            .map((q) => {
+                              const isUsed = templateQuestionsDraft.some((qId, qIndex) => qId === q.id && qIndex !== index);
+                              return (
+                                <option key={q.id} value={q.id} disabled={isUsed}>
+                                  {q.title} {isUsed ? "(selected in another slot)" : ""}
+                                </option>
+                              );
+                            })}
+                        </select>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div className="question-setup-card-actions">
+                  <Button type="button" onClick={() => setTemplateEditorStep(3)}>
+                    Continue to delivery
+                  </Button>
+                </div>
+              </section>
+
+              <section className={`question-setup-card is-visible is-complete ${templateEditorStep === 3 ? "is-current" : ""}`}>
+                <div className="question-setup-card-heading">
+                  <span>3</span>
+                  <div>
+                    <strong>How should questions be delivered?</strong>
+                    <p>Use a fixed set for identical tests or a randomized pool when candidates can receive different matching questions.</p>
+                  </div>
+                </div>
+                <div className="question-delivery-toggle" role="group" aria-label="Question delivery mode">
+                  <button
+                    type="button"
+                    className={!templateShuffleDraft ? "is-active" : ""}
+                    onClick={() => {
+                      setTemplateShuffleDraft(false);
+                      setTemplateEditorStep(4);
+                    }}
+                  >
+                    <strong>Fixed set</strong>
+                    <span>Everyone receives the same {templateDraft.length} questions in blueprint order.</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={templateShuffleDraft ? "is-active" : ""}
+                    onClick={() => {
+                      setTemplateShuffleDraft(true);
+                      setTemplateEditorStep(4);
+                    }}
+                  >
+                    <strong>Randomized pool</strong>
+                    <span>Each candidate receives {templateDraft.length} matching questions from the selected pool.</span>
+                  </button>
+                </div>
+              </section>
+
+              <section className={`question-setup-card is-visible ${templateEditorStep === 4 ? "is-current" : ""} ${draftSelectionReady ? "is-complete" : ""}`}>
+                <div className="question-setup-card-heading">
+                  <span>4</span>
+                  <div>
+                    <strong>Review how the current question pool matches this template</strong>
+                    <p>Apply the template here, then adjust the selected questions below the modal if the pool needs changes.</p>
+                  </div>
+                </div>
+                <div className="question-template-editor-summary">
+                  <div className="template-requirements-copy">
+                    <span className="panel-eyebrow">Template preview</span>
+                    <strong>{draftSelectionReady ? "Current pool matches this template" : "Current pool needs attention"}</strong>
+                    <p>{draftTemplateLabel}</p>
+                  </div>
+                  <div className="template-requirements-meta">
+                    <div className="meta-item">
+                      <span>Delivery rule</span>
+                      <strong>{templateShuffleDraft ? "Randomized per candidate" : "Same for everyone"}</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Questions selected</span>
+                      <strong>{templateQuestionsDraft.filter(Boolean).length} selected</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Assessment total</span>
+                      <strong>100 marks</strong>
+                    </div>
+                  </div>
+                  <div className="template-quota-grid">
+                    {QUESTION_DIFFICULTIES.filter((difficulty) => draftRequiredCounts[difficulty] > 0).map((difficulty) => {
+                      const complete = draftSelectedCounts[difficulty] >= draftRequiredCounts[difficulty];
+                      return (
+                        <div key={difficulty} className={complete ? "is-complete" : "is-needed"}>
+                          <span className={`difficulty-chip difficulty-${difficulty}`}>{difficulty}</span>
+                          <strong>{draftSelectedCounts[difficulty]} / {draftRequiredCounts[difficulty]}</strong>
+                          <em>{complete ? "Ready" : `${draftRequiredCounts[difficulty] - draftSelectedCounts[difficulty]} more required`}</em>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
             </div>
+
             <div className="confirm-dialog-actions">
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => {
-                  setTemplateDraft(
-                    assessment.difficulty_blueprint?.length
-                      ? assessment.difficulty_blueprint
-                      : createQuestionBlueprint(assessment.question_count_per_candidate || 1),
-                  );
                   setShowTemplateDialog(false);
                 }}
               >
@@ -3176,13 +3613,25 @@ function QuestionSetPanel({
               </Button>
               <Button
                 type="button"
+                disabled={!allSlotsHaveQuestions}
                 onClick={() => {
+                  const nextSelection: Record<string, AssessmentQuestionAssignment> = {};
+                  templateQuestionsDraft.forEach((qId, index) => {
+                    if (qId) {
+                      nextSelection[qId] = {
+                        question_id: qId,
+                        question_order: index + 1,
+                        marks: draftTemplateMarks[index],
+                        is_mandatory: true,
+                      };
+                    }
+                  });
+                  onUpdateSelection(() => nextSelection);
                   setHasTemplateDraft(true);
                   setShowTemplateDialog(false);
-                  setShowQuestionBankPicker(true);
                 }}
               >
-                Apply Template & Select Questions
+                Apply Changes
               </Button>
             </div>
           </div>

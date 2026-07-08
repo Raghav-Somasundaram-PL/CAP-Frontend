@@ -22,6 +22,7 @@ import {
 } from "./AssessmentStatusPrimitives";
 
 type CandidateEntryMode = "csv" | "manual";
+type CandidateStatusCounts = Record<CandidateAssessmentStatus, number>;
 
 function createManualCandidateRow(): ManualCandidateRow {
   return {
@@ -30,6 +31,85 @@ function createManualCandidateRow(): ManualCandidateRow {
     email: "",
     external_id: "",
   };
+}
+
+function createCandidateStatusCounts(): CandidateStatusCounts {
+  return {
+    not_started: 0,
+    in_progress: 0,
+    submitted: 0,
+    auto_submitted: 0,
+    revoked: 0,
+  };
+}
+
+function percentage(value: number, total: number) {
+  return total > 0
+    ? Math.min(100, Math.max(0, Math.round((value / total) * 100)))
+    : 0;
+}
+
+function CandidatePipelineCard({
+  candidates,
+}: {
+  candidates: SlotCandidate[];
+}) {
+  const counts = candidates.reduce((nextCounts, candidate) => {
+    nextCounts[candidate.assessment_status] += 1;
+    return nextCounts;
+  }, createCandidateStatusCounts());
+  const candidateCount = candidates.length;
+  const submittedCount = counts.submitted + counts.auto_submitted;
+  const inProgressCount = counts.in_progress;
+  const revokedCount = counts.revoked;
+  const notStartedCount = counts.not_started;
+  const completionRate = percentage(submittedCount, candidateCount);
+
+  return (
+    <Card className="assessment-panel candidate-pipeline-card">
+      <div className="dashboard-analytics-heading">
+        <div>
+          <p className="dashboard-eyebrow">Candidate pipeline</p>
+          <h2>Test candidate progress</h2>
+        </div>
+        <strong>{submittedCount}/{candidateCount}</strong>
+      </div>
+
+      {candidateCount ? (
+        <>
+          <div
+            className="dashboard-pipeline-bar"
+            aria-label={`${completionRate}% of candidates submitted`}
+          >
+            <span
+              className="is-submitted"
+              style={{ width: `${percentage(submittedCount, candidateCount)}%` }}
+            />
+            <span
+              className="is-progress"
+              style={{ width: `${percentage(inProgressCount, candidateCount)}%` }}
+            />
+            <span
+              className="is-not-started"
+              style={{ width: `${percentage(notStartedCount, candidateCount)}%` }}
+            />
+            <span
+              className="is-revoked"
+              style={{ width: `${percentage(revokedCount, candidateCount)}%` }}
+            />
+          </div>
+          <div className="dashboard-pipeline-legend">
+            <span className="is-submitted">Submitted <strong>{submittedCount}</strong></span>
+            <span className="is-progress">In progress <strong>{inProgressCount}</strong></span>
+            <span className="is-not-started">Not started <strong>{notStartedCount}</strong></span>
+            <span className="is-revoked">Revoked <strong>{revokedCount}</strong></span>
+          </div>
+        </>
+      ) : (
+        <p className="empty-state">Add candidates to see their test progress here.</p>
+      )}
+    </Card>
+  );
 }
 
 export function CandidatesTab({
@@ -137,6 +217,8 @@ export function CandidatesTab({
         .filter(Boolean)
         .join(" ")}
     >
+      <CandidatePipelineCard candidates={candidates} />
+
       <Card className="assessment-panel candidates-list-card">
         <div className="panel-heading candidates-list-heading">
           <div>
@@ -455,9 +537,18 @@ function CandidateTable({
 export function LiveMonitoringTab({
   items,
   loading,
+  liveSummary,
 }: {
   items: MonitoringCandidate[];
   loading: boolean;
+  liveSummary?: {
+    isLive: boolean;
+    statusLabel: string;
+    secondsUntilClose: number;
+    inProgressCount: number;
+    submittedCount: number;
+    candidateCount: number;
+  };
 }) {
   const statusCounts = items.reduce(
     (counts, item) => ({
@@ -476,6 +567,26 @@ export function LiveMonitoringTab({
         </div>
         <strong>Refreshes every 15 seconds</strong>
       </div>
+
+      {liveSummary?.isLive ? (
+        <div className="live-monitoring-bar" role="status" aria-live="polite">
+          <div className="live-monitoring-pulse">
+            <span />
+            <strong>Live test running</strong>
+          </div>
+          <div className="live-monitoring-copy">
+            <strong>{liveSummary.statusLabel}</strong>
+            <span>
+              {liveSummary.inProgressCount} active · {liveSummary.submittedCount} submitted ·{" "}
+              {liveSummary.candidateCount} candidates
+            </span>
+          </div>
+          <div className="live-monitoring-countdown">
+            <strong>{formatDuration(liveSummary.secondsUntilClose)}</strong>
+            <span>remaining</span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="monitoring-status-strip">
         <MetricTile label="Not started" value={statusCounts.not_started || 0} />

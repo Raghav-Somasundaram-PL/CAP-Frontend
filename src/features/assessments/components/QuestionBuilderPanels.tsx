@@ -35,12 +35,14 @@ export function AgentRunOverlay({
   lines,
   progressEvents,
   latestEvent,
+  onStop,
 }: {
   scope: AgentRunScope;
   commentary: string;
   lines: string[];
   progressEvents: QuestionAIDraftProgressEvent[];
   latestEvent: QuestionAIDraftProgressEvent | null;
+  onStop?: () => void;
 }) {
   const title =
     scope === "full"
@@ -57,6 +59,11 @@ export function AgentRunOverlay({
     .slice(-5);
   const liveCommentary = latestEvent?.message || commentary;
   const progressValue = latestEvent?.progress ?? null;
+  const latestModelEvent = [...progressEvents]
+    .reverse()
+    .find((event) => Boolean(event.ai_model));
+  const modelLabel = latestModelEvent?.ai_model || "Connecting...";
+  const providerLabel = latestModelEvent?.ai_provider || "AI";
   const latestValidationPass = progressEvents.reduce(
     (latest, event) => Math.max(latest, event.validation_pass || 0),
     0,
@@ -91,6 +98,10 @@ export function AgentRunOverlay({
             <span>{scope === "validation" ? "Validation" : "Generation"}</span>
             <h2>{title}</h2>
             <p>{liveCommentary}</p>
+            <div className="agent-model-chip" aria-label={`Current AI model: ${modelLabel}`}>
+              <b>{providerLabel}</b>
+              <code>{modelLabel}</code>
+            </div>
           </div>
         </div>
         {showLiveProgress && progressValue !== null ? (
@@ -218,9 +229,28 @@ export function AgentRunOverlay({
           </div>
         )}
         <p className="agent-run-foot">
-          Keep this page open. This popup now tracks the live agent updates, and
-          the builder will apply the accepted fields automatically when the run finishes.
+          You can open another menu while this continues. Return to this question from
+          Question Management to view the live updates or review the completed result.
         </p>
+        {onStop ? (
+          <div style={{ marginTop: "16px", display: "flex", justifyContent: "center" }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onStop}
+              style={{
+                backgroundColor: "#ef4444",
+                color: "#ffffff",
+                border: "none",
+                fontWeight: 600,
+                padding: "8px 24px",
+                borderRadius: "8px"
+              }}
+            >
+              Stop Generation
+            </Button>
+          </div>
+        ) : null}
       </Card>
     </div>
   );
@@ -228,51 +258,21 @@ export function AgentRunOverlay({
 
 export function StepCard({
   step,
-  active,
-  visualState = "untouched",
   busy = false,
-  completed = false,
-  onToggle,
   onGenerate,
   children,
 }: {
   step: QuestionBuilderStep;
-  active: boolean;
-  visualState?: "untouched" | "in-progress" | "complete";
   busy?: boolean;
-  completed?: boolean;
-  onToggle: () => void;
   onGenerate?: () => void;
   children: ReactNode;
 }) {
   return (
     <Card
-      className={[
-        "step-card",
-        active ? "is-active" : "",
-        completed ? "is-complete" : "",
-        `is-${visualState}`,
-        busy ? "is-loading" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
+      className={`step-card${busy ? " is-loading" : ""}`}
     >
-      <div className="step-card-header">
-        <button type="button" className="step-card-toggle" onClick={onToggle}>
-          <div>
-            <p>
-              {busy
-                ? "Agent loading"
-                : visualState === "complete"
-                  ? "Section complete"
-                  : visualState === "untouched"
-                    ? "Not visited"
-                    : `Step ${step.id} in progress`}
-            </p>
-            <h3>{step.title}</h3>
-          </div>
-        </button>
-        {onGenerate ? (
+      {onGenerate ? (
+        <div className="step-card-tools">
           <Button
             type="button"
             variant="secondary"
@@ -285,15 +285,11 @@ export function StepCard({
             <Sparkles size={16} />
             {busy ? "Working..." : step.actionLabel}
           </Button>
-        ) : null}
-      </div>
-      {active ? (
-        <div className="step-card-body">
-          {children}
         </div>
       ) : null}
+      <div className="step-card-body">
+        {children}
+      </div>
     </Card>
   );
 }
-
-

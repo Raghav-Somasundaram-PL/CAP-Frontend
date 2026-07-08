@@ -60,6 +60,13 @@ const FULLSCREEN_EXIT_MESSAGE =
   "Assessment closed because strict fullscreen mode was exited.";
 const HIDDEN_CHECK_COOLDOWN_SECONDS = 5;
 const TEST_RESULT_REVEAL_INTERVAL_MS = 100;
+const CANDIDATE_ANSWER_VALIDATION_LABELS = {
+  exact: "Exact output",
+  unordered: "Order flexible",
+  floating: "Numeric tolerance",
+  multiple_valid: "Multiple answers",
+  constructive: "Any valid construction",
+} as const;
 
 interface RunResultCase {
   index: number;
@@ -209,6 +216,11 @@ export function CandidateAssessmentPage() {
   const submitOnceRef = useRef(false);
   const fullscreenAttemptedRef = useRef(false);
   const hasEnteredFullscreenRef = useRef(false);
+  const tabSwitchCountRef = useRef(0);
+  const clipboardCountRef = useRef(0);
+  const fullscreenExitCountRef = useRef(0);
+  const questionTimeSpentRef = useRef<Record<string, number>>({});
+  const evidenceAssignmentRef = useRef("");
   const hasReceivedPositiveTimerRef = useRef(false);
   const latestDraftsRef = useRef<Record<string, DraftState>>({});
   const timerSyncRef = useRef({
@@ -224,6 +236,7 @@ export function CandidateAssessmentPage() {
   });
 
   latestDraftsRef.current = drafts;
+  questionTimeSpentRef.current = questionTimeSpentSeconds;
 
   useEffect(() => {
     if (!sessionToken) {
@@ -274,20 +287,33 @@ export function CandidateAssessmentPage() {
   }, [assessmentQuery.data, selectedQuestionId]);
 
   useEffect(() => {
-    const assessmentId = assessmentQuery.data?.candidate_assessment_id;
-    if (!assessmentId) {
+    const assessment = assessmentQuery.data;
+    const assessmentId = assessment?.candidate_assessment_id;
+    if (!assessmentId || evidenceAssignmentRef.current === assessmentId) {
       return;
     }
+    evidenceAssignmentRef.current = assessmentId;
+    tabSwitchCountRef.current = assessment.tab_switch_count || 0;
+    clipboardCountRef.current = assessment.copy_paste_count || 0;
+    fullscreenExitCountRef.current = assessment.fullscreen_exit_count || 0;
+    setTabSwitchWarnings(Math.min(assessment.tab_switch_count || 0, TAB_SWITCH_LIMIT));
     const storageKey = `candidate-question-time-${assessmentId}`;
+    let storedTimes: Record<string, number> = {};
     try {
       const stored = window.sessionStorage.getItem(storageKey);
       if (stored) {
-        setQuestionTimeSpentSeconds(JSON.parse(stored) as Record<string, number>);
+        storedTimes = JSON.parse(stored) as Record<string, number>;
       }
     } catch {
-      setQuestionTimeSpentSeconds({});
+      storedTimes = {};
     }
-  }, [assessmentQuery.data?.candidate_assessment_id]);
+    const mergedTimes = { ...assessment.question_time_seconds };
+    Object.entries(storedTimes).forEach(([questionId, seconds]) => {
+      mergedTimes[questionId] = Math.max(mergedTimes[questionId] || 0, seconds);
+    });
+    questionTimeSpentRef.current = mergedTimes;
+    setQuestionTimeSpentSeconds(mergedTimes);
+  }, [assessmentQuery.data]);
 
   const selectedQuestion = useMemo(
     () =>
@@ -431,6 +457,10 @@ export function CandidateAssessmentPage() {
         source_code: sourceCode,
         language,
         current_question_order: currentQuestionOrder,
+        tab_switch_count: tabSwitchCountRef.current,
+        copy_paste_count: clipboardCountRef.current,
+        fullscreen_exit_count: fullscreenExitCountRef.current,
+        question_time_seconds: questionTimeSpentRef.current,
       }),
     onSuccess: (data) => {
       setLastSavedAt(data.saved_at);
@@ -466,7 +496,11 @@ export function CandidateAssessmentPage() {
           status: item.status,
           executionTime: item.execution_time,
           detail:
-            item.actual_output || item.stderr || item.compile_output || item.message,
+            item.actual_output ||
+            item.stderr ||
+            item.compile_output ||
+            item.checker_message ||
+            item.message,
           expectedOutput: item.expected_output,
           actualOutput: item.actual_output,
           errorType: item.passed ? "" : item.status || "Execution failed",
@@ -547,6 +581,10 @@ export function CandidateAssessmentPage() {
         auto_submit: auto,
         submission_tag: submissionTag || "",
         submission_message: submissionMessage || "",
+        tab_switch_count: tabSwitchCountRef.current,
+        copy_paste_count: clipboardCountRef.current,
+        fullscreen_exit_count: fullscreenExitCountRef.current,
+        question_time_seconds: questionTimeSpentRef.current,
       });
       return {
         ...response,
@@ -735,6 +773,7 @@ export function CandidateAssessmentPage() {
         return;
       }
       if (hasEnteredFullscreenRef.current) {
+        fullscreenExitCountRef.current += 1;
         submitAutomatically(FULLSCREEN_EXIT_TAG, FULLSCREEN_EXIT_MESSAGE);
       } else {
         setFullscreenPromptVisible(true);
@@ -805,8 +844,12 @@ export function CandidateAssessmentPage() {
       if (submitOnceRef.current) {
         return;
       }
-      setTabSwitchWarnings((current) => {
-        const next = Math.min(current + 1, TAB_SWITCH_LIMIT);
+      tabSwitchCountRef.current = Math.min(
+        tabSwitchCountRef.current + 1,
+        TAB_SWITCH_LIMIT,
+      );
+      setTabSwitchWarnings(() => {
+        const next = tabSwitchCountRef.current;
         if (next >= TAB_SWITCH_LIMIT) {
           submitAutomatically(TAB_SWITCH_TAG, TAB_SWITCH_MESSAGE);
           return next;
@@ -841,6 +884,7 @@ export function CandidateAssessmentPage() {
     }
 
     function handleClipboard(event: ClipboardEvent) {
+      clipboardCountRef.current += 1;
       if (mode === "strict") {
         event.preventDefault();
       }
@@ -1040,7 +1084,26 @@ export function CandidateAssessmentPage() {
                   </span>
                   <h1>{selectedQuestion.title}</h1>
                 </div>
-                {selectedQuestion.is_mandatory ? <span className="status-badge status-info">mandatory</span> : null}
+                <div className="candidate-problem-badges">
+                  <span
+                    className={`candidate-answer-checker ${
+                      selectedQuestion.answer_validation_mode !== "exact"
+                        ? "is-highlighted"
+                        : ""
+                    }`}
+                    title={selectedQuestion.output_checker_explanation}
+                  >
+                    <CheckCircle2 size={14} aria-hidden="true" />
+                    {
+                      CANDIDATE_ANSWER_VALIDATION_LABELS[
+                        selectedQuestion.answer_validation_mode
+                      ]
+                    }
+                  </span>
+                  {selectedQuestion.is_mandatory ? (
+                    <span className="status-badge status-info">mandatory</span>
+                  ) : null}
+                </div>
               </div>
 
               <section className="candidate-problem-section">

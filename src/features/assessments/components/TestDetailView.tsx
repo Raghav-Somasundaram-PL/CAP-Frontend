@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BadgeCheck, BarChart3, Gauge } from "lucide-react";
+import { BadgeCheck, BarChart3, Gauge, Settings } from "lucide-react";
 
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -95,8 +95,8 @@ export function TestDetailView({
   ) => Promise<unknown> | void;
   onResend: (candidateAssessmentId: string) => void;
 }) {
-  const [isEditingSlot, setIsEditingSlot] = useState(false);
   const [isManagingTest, setIsManagingTest] = useState(false);
+  const [showTestSettings, setShowTestSettings] = useState(false);
   const [pendingTestAction, setPendingTestAction] =
     useState<AssessmentSlotActionPayload | null>(null);
   const [testResponseMessage, setTestResponseMessage] = useState("");
@@ -286,8 +286,7 @@ export function TestDetailView({
       setTestResponseMessage(
         `Test details updated successfully. New window: ${formatDateTime(startAt)} to ${formatDateTime(endAt)}.`,
       );
-      setIsEditingSlot(false);
-      setIsManagingTest(false);
+      setShowTestSettings(false);
     } catch (error) {
       setTestResponseTone("warning");
       setTestResponseMessage(
@@ -326,6 +325,16 @@ export function TestDetailView({
             <Button
               type="button"
               variant="secondary"
+              className="icon-only-button"
+              onClick={() => setShowTestSettings(true)}
+              title="Test settings"
+            >
+              <Settings size={18} aria-hidden="true" />
+              <span className="sr-only">Test settings</span>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
               onClick={() => setIsManagingTest(true)}
             >
               Manage Test
@@ -350,12 +359,6 @@ export function TestDetailView({
             <strong>{slot.duration_minutes || assessment.duration_minutes}m</strong>
             Duration
           </span>
-        </div>
-
-        <div className="test-meta-line">
-          <span>{slot.timezone_name}</span>
-          <span>GMT offset {slot.timezone_offset_minutes} minutes</span>
-          <span>{slot.is_accepting_responses ? "Accepting responses" : "Not accepting responses"}</span>
         </div>
       </Card>
 
@@ -383,7 +386,6 @@ export function TestDetailView({
                 onClick={() => {
                   setIsManagingTest(false);
                   setPendingTestAction(null);
-                  setIsEditingSlot(false);
                   setTestResponseMessage("");
                 }}
               >
@@ -391,7 +393,7 @@ export function TestDetailView({
               </Button>
             </div>
 
-            <div className="test-timing-summary">
+            <div className="test-control-overview">
               <div>
                 <span>Current status</span>
                 <strong>{effectiveStatus.replace("_", " ")}</strong>
@@ -420,7 +422,7 @@ export function TestDetailView({
               </div>
             </div>
 
-            <div className="test-management-actions">
+            <div className="test-management-actions" aria-label="Test controls">
               <button
                 type="button"
                 className={`test-action-card ${canPauseTest ? "" : "is-unavailable"}`}
@@ -465,36 +467,39 @@ export function TestDetailView({
                     : "Available only while paused."}
                 </em>
               </button>
-              <label className="field compact-field">
-                <span>Extend minutes</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={720}
-                  value={extendMinutes}
-                  onChange={(event) => setExtendMinutes(Number(event.target.value))}
-                />
-              </label>
-              <button
-                type="button"
-                className={`test-action-card ${canExtendTest ? "" : "is-unavailable"}`}
-                disabled={slotUpdatePending}
-                onClick={() =>
-                  requestTestAction(
-                    {
-                      action: "extend",
-                      extend_minutes: Math.max(extendMinutes, 1),
-                    },
-                    canExtendTest
-                      ? undefined
-                      : "This test is closed. Reopening closed tests is not supported in this flow.",
-                  )
-                }
-              >
+              <div className={`test-action-card test-extend-card ${canExtendTest ? "" : "is-unavailable"}`}>
                 <span>Extend</span>
                 <strong>Extend Time</strong>
+                <label>
+                  <small>Minutes</small>
+                  <input
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={extendMinutes}
+                    onChange={(event) => setExtendMinutes(Number(event.target.value))}
+                  />
+                </label>
                 <em>New end: {formatDateTime(proposedExtendedEndAt)}</em>
-              </button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={slotUpdatePending}
+                  onClick={() =>
+                    requestTestAction(
+                      {
+                        action: "extend",
+                        extend_minutes: Math.max(extendMinutes, 1),
+                      },
+                      canExtendTest
+                        ? undefined
+                        : "This test is closed. Reopening closed tests is not supported in this flow.",
+                    )
+                  }
+                >
+                  Prepare extension
+                </Button>
+              </div>
               <button
                 type="button"
                 className={`test-action-card test-action-danger ${canCloseTest ? "" : "is-unavailable"
@@ -544,132 +549,6 @@ export function TestDetailView({
                 </div>
               </div>
             ) : null}
-
-            <div className="test-management-edit-header">
-              <div>
-                <span className="panel-eyebrow">Batch Details</span>
-                <h3>Test schedule and instructions</h3>
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setIsEditingSlot((current) => !current)}
-              >
-                {isEditingSlot ? "Hide Edit" : "Edit Test Details"}
-              </Button>
-            </div>
-
-            {isEditingSlot ? (
-              <div className="assessment-form-stack slot-edit-form">
-                <label className="field">
-                  <span>Test title</span>
-                  <input
-                    value={editForm.title}
-                    onChange={(event) =>
-                      setEditForm({ ...editForm, title: event.target.value })
-                    }
-                  />
-                </label>
-                <div className="assessment-inline-fields">
-                  <label className="field">
-                    <span>Time region</span>
-                    <select
-                      value={editForm.timezone_name}
-                      onChange={(event) => {
-                        const timezone = TIME_ZONE_OPTIONS.find(
-                          (option) => option.name === event.target.value,
-                        );
-                        if (!timezone) {
-                          return;
-                        }
-                        setEditForm({
-                          ...editForm,
-                          timezone_name: timezone.name,
-                          timezone_offset_minutes:
-                            timezoneOffsetMinutesForLocalDateTime(
-                              editForm.start_at || editForm.end_at,
-                              timezone.name,
-                              timezone.fallbackOffset,
-                            ),
-                        });
-                      }}
-                    >
-                      {TIME_ZONE_OPTIONS.map((timezone) => (
-                        <option
-                          key={timezone.name}
-                          value={timezone.name}
-                        >
-                          {timezone.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Start time</span>
-                    <input
-                      type="datetime-local"
-                      min={minimumEditStart}
-                      value={editForm.start_at}
-                      onChange={(event) => {
-                        const startAt = event.target.value;
-                        setEditForm({
-                          ...editForm,
-                          start_at: startAt,
-                          end_at: addMinutesToLocalInput(startAt, editForm.duration_minutes),
-                        });
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Test duration (minutes)</span>
-                    <input
-                      type="number"
-                      min={15}
-                      max={360}
-                      value={editForm.duration_minutes}
-                      onChange={(event) => {
-                        const duration = Math.max(15, Number(event.target.value) || 15);
-                        setEditForm({
-                          ...editForm,
-                          duration_minutes: duration,
-                          end_at: addMinutesToLocalInput(editForm.start_at, duration),
-                        });
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>End time</span>
-                    <input
-                      type="datetime-local"
-                      min={minimumEditEnd}
-                      value={editForm.end_at}
-                      onChange={(event) =>
-                        setEditForm({ ...editForm, end_at: event.target.value })
-                      }
-                    />
-                  </label>
-                </div>
-                <label className="field">
-                  <span>Batch instructions override</span>
-                  <textarea
-                    value={editForm.instructions_override}
-                    onChange={(event) =>
-                      setEditForm({
-                        ...editForm,
-                        instructions_override: event.target.value,
-                      })
-                    }
-                  />
-                </label>
-                <Button
-                  type="button"
-                  disabled={slotUpdatePending}
-                  onClick={() => void saveSlotChanges()}
-                >
-                  {slotUpdatePending ? "Saving..." : "Save Slot Changes"}
-                </Button>
-              </div>
-            ) : null}
             {testResponseMessage && testResponseTone === "warning" ? (
               <div className="question-flow-toast-stack" aria-live="assertive">
                 <div className="question-flow-toast is-warning" role="alert">
@@ -682,6 +561,151 @@ export function TestDetailView({
             ) : null}
             {slotUpdateError ? <p className="form-error">{slotUpdateError}</p> : null}
           </div>
+        </div>
+      ) : null}
+
+      {showTestSettings ? (
+        <div className="dialog-backdrop" onClick={() => setShowTestSettings(false)}>
+          <Card
+            className="test-settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="test-settings-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-modal-header">
+              <div>
+                <span>Settings</span>
+                <h2 id="test-settings-title">Test settings</h2>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setShowTestSettings(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="assessment-form-stack slot-edit-form">
+              <label className="field">
+                <span>Test title</span>
+                <input
+                  value={editForm.title}
+                  onChange={(event) =>
+                    setEditForm({ ...editForm, title: event.target.value })
+                  }
+                />
+              </label>
+              <div className="assessment-inline-fields">
+                <label className="field">
+                  <span>Time region</span>
+                  <select
+                    value={editForm.timezone_name}
+                    onChange={(event) => {
+                      const timezone = TIME_ZONE_OPTIONS.find(
+                        (option) => option.name === event.target.value,
+                      );
+                      if (!timezone) {
+                        return;
+                      }
+                      setEditForm({
+                        ...editForm,
+                        timezone_name: timezone.name,
+                        timezone_offset_minutes:
+                          timezoneOffsetMinutesForLocalDateTime(
+                            editForm.start_at || editForm.end_at,
+                            timezone.name,
+                            timezone.fallbackOffset,
+                          ),
+                      });
+                    }}
+                  >
+                    {TIME_ZONE_OPTIONS.map((timezone) => (
+                      <option key={timezone.name} value={timezone.name}>
+                        {timezone.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Start time</span>
+                  <input
+                    type="datetime-local"
+                    min={minimumEditStart}
+                    value={editForm.start_at}
+                    onChange={(event) => {
+                      const startAt = event.target.value;
+                      setEditForm({
+                        ...editForm,
+                        start_at: startAt,
+                        end_at: addMinutesToLocalInput(
+                          startAt,
+                          editForm.duration_minutes,
+                        ),
+                      });
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>Test duration (minutes)</span>
+                  <input
+                    type="number"
+                    min={15}
+                    max={360}
+                    value={editForm.duration_minutes}
+                    onChange={(event) => {
+                      const duration = Math.max(15, Number(event.target.value) || 15);
+                      setEditForm({
+                        ...editForm,
+                        duration_minutes: duration,
+                        end_at: addMinutesToLocalInput(editForm.start_at, duration),
+                      });
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>End time</span>
+                  <input
+                    type="datetime-local"
+                    min={minimumEditEnd}
+                    value={editForm.end_at}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, end_at: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+              <label className="field">
+                <span>Batch instructions override</span>
+                <textarea
+                  value={editForm.instructions_override}
+                  onChange={(event) =>
+                    setEditForm({
+                      ...editForm,
+                      instructions_override: event.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className="settings-modal-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowTestSettings(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={slotUpdatePending}
+                  onClick={() => void saveSlotChanges()}
+                >
+                  {slotUpdatePending ? "Saving..." : "Save Settings"}
+                </Button>
+              </div>
+            </div>
+            {slotUpdateError ? <p className="form-error">{slotUpdateError}</p> : null}
+          </Card>
         </div>
       ) : null}
 
@@ -749,6 +773,14 @@ export function TestDetailView({
         <LiveMonitoringTab
           items={monitoringItems}
           loading={monitoringLoading}
+          liveSummary={{
+            isLive: effectiveStatus === "active",
+            statusLabel,
+            secondsUntilClose,
+            inProgressCount,
+            submittedCount,
+            candidateCount: slot.candidate_count,
+          }}
         />
       ) : null}
 
