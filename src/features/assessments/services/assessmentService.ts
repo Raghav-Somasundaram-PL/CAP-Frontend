@@ -225,3 +225,63 @@ export async function fetchSlotMonitoring(
   );
   return response.data;
 }
+
+export async function streamSlotMonitoring(
+  idToken: string,
+  slotId: string,
+  onMonitoring: (payload: MonitoringResponse) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    `${coreApiClient.defaults.baseURL || ""}/assessments/slots/${slotId}/monitoring/stream`,
+    {
+      headers: {
+        ...authHeader(idToken),
+        Accept: "text/event-stream",
+      },
+      credentials: "include",
+      signal,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Unable to open live monitoring stream.");
+  }
+
+  if (!response.body) {
+    throw new Error("Live monitoring stream is unavailable in this browser.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const eventBlocks = buffer.split("\n\n");
+    buffer = eventBlocks.pop() || "";
+
+    for (const eventBlock of eventBlocks) {
+      const lines = eventBlock.split("\n");
+      const eventName = lines
+        .find((line) => line.startsWith("event:"))
+        ?.replace("event:", "")
+        .trim();
+      const data = lines
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.replace("data:", "").trim())
+        .join("\n");
+
+      if (eventName !== "monitoring" || !data) {
+        continue;
+      }
+
+      onMonitoring(JSON.parse(data) as MonitoringResponse);
+    }
+  }
+}

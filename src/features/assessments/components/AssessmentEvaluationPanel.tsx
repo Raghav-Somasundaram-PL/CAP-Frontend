@@ -261,7 +261,7 @@ export function AssessmentEvaluationPanel({
                     to={assessmentTestPath(assessment.id, slot.id, assessment.title, slot.title)}
                   >
                     <FileText size={17} aria-hidden="true" />
-                    <span>Open test analytics</span>
+                    <span>Open test slot analytics</span>
                   </Link>
                 </article>
               ))}
@@ -274,7 +274,6 @@ export function AssessmentEvaluationPanel({
           {slotAnalytics.length > 0 ? (
             <EvaluationSection eyebrow="Visual comparisons" title="Key metrics by test slot">
               <div className="analytics-charts-grid">
-                
                 {/* Average Final Score Comparison */}
                 <div className="analytics-chart-card">
                   <h3>Average Final Score</h3>

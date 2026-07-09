@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { User } from "firebase/auth";
+import { useEffect } from "react";
 
 import {
   backfillAssessmentEvaluations,
@@ -15,6 +16,7 @@ import {
   resendCandidateInvite,
   sendSlotInvites,
   setAssessmentQuestions,
+  streamSlotMonitoring,
   updateAssessment,
   updateAssessmentSlot,
 } from "../services/assessmentService";
@@ -242,11 +244,46 @@ export function useResendCandidateInvite(user: User | null) {
 }
 
 export function useSlotMonitoring(user: User | null, slotId: string | null) {
+  const queryClient = useQueryClient();
+  const userId = user?.uid;
+
+  useEffect(() => {
+    if (!user || !slotId) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+
+    user
+      .getIdToken()
+      .then((idToken) => {
+        if (controller.signal.aborted) {
+          return undefined;
+        }
+        return streamSlotMonitoring(
+          idToken,
+          slotId,
+          (payload) => {
+            queryClient.setQueryData(["slot-monitoring", user.uid, slotId], payload);
+          },
+          controller.signal,
+        );
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          console.error("Live monitoring stream failed", error);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [queryClient, slotId, user, userId]);
+
   return useQuery({
-    queryKey: ["slot-monitoring", user?.uid, slotId],
+    queryKey: ["slot-monitoring", userId, slotId],
     queryFn: async () =>
       fetchSlotMonitoring(await getRequiredIdToken(user), slotId || ""),
     enabled: Boolean(user && slotId),
-    refetchInterval: 15000,
   });
 }

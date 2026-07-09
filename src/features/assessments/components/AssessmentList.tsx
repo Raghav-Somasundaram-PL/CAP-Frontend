@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { ChevronDown, ChevronRight, Clock3 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { StatusBadge } from "../../../components/common/StatusBadge";
@@ -112,7 +113,7 @@ export function AssessmentList({
                   <th>Status</th>
                   <th>Duration</th>
                   <th>Questions</th>
-                  <th>Tests</th>
+                  <th>Test Slots</th>
                   <th>Live</th>
                   <th>Scheduled</th>
                   <th>Passing</th>
@@ -181,16 +182,28 @@ export function AssessmentList({
                         <td>
                           <div className="assessment-row-actions">
                             {visibleTests.length ? (
-                              <Button
+                              <button
                                 aria-controls={testsRegionId}
                                 aria-expanded={expanded}
+                                className={`assessment-slots-toggle${
+                                  expanded ? " is-open" : ""
+                                }`}
                                 type="button"
-                                variant="secondary"
                                 onClick={() => toggleExpanded(assessment.id)}
                               >
-                                {expanded ? "Hide Tests" : "Show Tests"}
-                              </Button>
-                            ) : null}
+                                <span className="assessment-slots-toggle-count">
+                                  {visibleTests.length}
+                                </span>
+                                <span className="assessment-slots-toggle-copy">
+                                  {visibleTests.length === 1
+                                    ? "Test slot"
+                                    : "Test slots"}
+                                </span>
+                                <ChevronDown size={16} aria-hidden="true" />
+                              </button>
+                            ) : (
+                              <span className="assessment-slots-empty">—</span>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -201,36 +214,96 @@ export function AssessmentList({
                               className="assessment-test-dropdown"
                               id={testsRegionId}
                             >
-                              {visibleTests.map((slot) => (
-                                <article
-                                  key={slot.id}
-                                  className="assessment-test-mini-card"
-                                >
-                                  <div>
+                              <div className="assessment-test-dropdown-head">
+                                <div>
+                                  <span>Active test slots</span>
+                                  <strong>{assessment.title}</strong>
+                                </div>
+                                <small>
+                                  {visibleTests.length} visible slot
+                                  {visibleTests.length === 1 ? "" : "s"}
+                                </small>
+                              </div>
+                              <div className="test-card-grid assessment-test-slot-grid">
+                                {visibleTests.map((slot) => {
+                                  const submittedPercent = Math.round(
+                                    (slot.submitted_count /
+                                      Math.max(slot.candidate_count, 1)) *
+                                      100,
+                                  );
+                                  return (
                                     <Link
-                                      className="entity-link"
-                                      to={assessmentTestPath(assessment.id, slot.id, assessment.title, slot.title)}
+                                      key={slot.id}
+                                      className="test-summary-card"
+                                      to={assessmentTestPath(
+                                        assessment.id,
+                                        slot.id,
+                                        assessment.title,
+                                        slot.title,
+                                      )}
                                     >
-                                      {slot.title}
+                                      <span className="test-card-icon">
+                                        <Clock3 size={18} aria-hidden="true" />
+                                      </span>
+                                      <div className="test-card-primary">
+                                        <span className="test-card-kind">
+                                          Test Slot
+                                        </span>
+                                        <strong>{slot.title}</strong>
+                                        <span>
+                                          {formatDateTime(slot.start_at)} to{" "}
+                                          {formatDateTime(slot.end_at)}
+                                        </span>
+                                      </div>
+                                      <div className="test-card-metrics">
+                                        <span>
+                                          <strong>{slot.candidate_count}</strong>
+                                          Candidates
+                                        </span>
+                                        <span>
+                                          <strong>{slot.submitted_count}</strong>
+                                          Submitted
+                                        </span>
+                                        <span className="test-card-completion">
+                                          <strong>{submittedPercent}%</strong>
+                                          Completion
+                                          <i
+                                            className="test-card-progress"
+                                            aria-hidden="true"
+                                          >
+                                            <b
+                                              style={{
+                                                width: `${submittedPercent}%`,
+                                              }}
+                                            />
+                                          </i>
+                                        </span>
+                                      </div>
+                                      <div className="test-card-status">
+                                        <div className="status-with-dot">
+                                          <HealthDot
+                                            status={slot.effective_status}
+                                          />
+                                          <StatusBadge
+                                            value={slot.effective_status}
+                                          />
+                                        </div>
+                                        <small>
+                                          {slot.status === slot.effective_status
+                                            ? "Schedule current"
+                                            : `Configured as ${slot.status}`}
+                                        </small>
+                                      </div>
+                                      <span
+                                        className="test-card-open"
+                                        aria-hidden="true"
+                                      >
+                                        <ChevronRight size={20} />
+                                      </span>
                                     </Link>
-                                    <span>
-                                      {formatDateTime(slot.start_at)} to{" "}
-                                      {formatDateTime(slot.end_at)}
-                                    </span>
-                                  </div>
-                                  <div className="status-with-dot">
-                                    <HealthDot status={slot.effective_status} />
-                                    <StatusBadge value={slot.effective_status} />
-                                  </div>
-                                  <span>{slot.candidate_count} candidates</span>
-                                  <Link
-                                    className="button button-secondary assessment-open-link"
-                                    to={assessmentTestPath(assessment.id, slot.id, assessment.title, slot.title)}
-                                  >
-                                    Open Test
-                                  </Link>
-                                </article>
-                              ))}
+                                  );
+                                })}
+                              </div>
                             </div>
                           </td>
                         </tr>
@@ -244,7 +317,7 @@ export function AssessmentList({
         ) : null}
         {!loading && !assessments.length ? (
           <ListMessage>
-            No assessments yet. Create one to start scheduling tests.
+            No assessments yet. Create one to start scheduling test slots.
           </ListMessage>
         ) : null}
       </Card>

@@ -2,6 +2,7 @@ import {
   ClipboardList,
   FileQuestion,
   Gauge,
+  PlusCircle,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -19,6 +20,10 @@ const ICONS: Record<(typeof NAVIGATION_ITEMS)[number]["icon"], LucideIcon> = {
   questions: FileQuestion,
   settings: Settings,
 };
+
+function collapseSidebarFocus(event: { currentTarget: HTMLElement }) {
+  event.currentTarget.blur();
+}
 
 export function Sidebar() {
   const { currentUser } = useAuth();
@@ -46,6 +51,7 @@ export function Sidebar() {
           to="/recruiter/dashboard"
           aria-label={`${APP_NAME} home`}
           title="Dashboard"
+          onClick={collapseSidebarFocus}
         >
           <span className="cap-logo" aria-hidden="true">
             <span />
@@ -67,6 +73,7 @@ export function Sidebar() {
                 to={item.path}
                 title={item.label}
                 aria-label={item.label}
+                onClick={collapseSidebarFocus}
               >
                 <span className="nav-icon">
                   <Icon size={21} strokeWidth={1.9} aria-hidden="true" />
@@ -74,22 +81,37 @@ export function Sidebar() {
                 <span className="nav-label">{item.label}</span>
               </NavLink>
 
-              {item.icon === "assessments" && recentAssessments.length ? (
+              {item.icon === "assessments" ? (
                 <div
-                  className="sidebar-subnav"
-                  aria-label="Recent assessments"
+                  className="sidebar-subnav sidebar-assessments-menu"
+                  aria-label="Assessments menu"
                 >
-                  <span className="sidebar-subnav-label">Recent</span>
-                  {recentAssessments.map((assessment) => (
-                    <NavLink
-                      className="sidebar-assessment-link"
-                      key={assessment.id}
-                      to={assessmentPath(assessment.id)}
-                      title={assessment.title}
-                    >
-                      <span>{assessment.title}</span>
-                    </NavLink>
-                  ))}
+                  <NavLink
+                    className="sidebar-assessment-link sidebar-assessment-action"
+                    to="/recruiter/assessments/new"
+                    title="New assessment"
+                    onClick={collapseSidebarFocus}
+                  >
+                    <PlusCircle size={14} strokeWidth={2} aria-hidden="true" />
+                    <span>New assessment</span>
+                  </NavLink>
+
+                  {recentAssessments.length ? (
+                    <>
+                      <span className="sidebar-subnav-label">Recent</span>
+                      {recentAssessments.map((assessment) => (
+                        <NavLink
+                          className="sidebar-assessment-link"
+                          key={assessment.id}
+                          to={assessmentPath(assessment.id)}
+                          title={assessment.title}
+                          onClick={collapseSidebarFocus}
+                        >
+                          <span>{assessment.title}</span>
+                        </NavLink>
+                      ))}
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -104,6 +126,7 @@ export function Sidebar() {
               to={settingsItem.path}
               title={settingsItem.label}
               aria-label={settingsItem.label}
+              onClick={collapseSidebarFocus}
             >
               <span className="nav-icon">
                 <Settings size={21} strokeWidth={1.9} aria-hidden="true" />

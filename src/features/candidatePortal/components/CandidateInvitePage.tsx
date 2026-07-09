@@ -150,8 +150,8 @@ export function CandidateInvitePage() {
               <h2>Before you start</h2>
               <p>{invite.instructions || "Read each question carefully, save your progress, and submit before the timer ends."}</p>
               <ul>
-                <li>Use only the supported languages shown inside the test portal.</li>
-                <li>Your work autosaves during the test, but use Save Progress before switching questions if your network is unstable.</li>
+                <li>Use only the supported languages shown inside the test slot portal.</li>
+                <li>Your work autosaves during the test slot, but use Save Progress before switching questions if your network is unstable.</li>
                 <li>The final submission runs hidden checks first; detailed evaluation runs only if the pass mark is met.</li>
               </ul>
             </section>

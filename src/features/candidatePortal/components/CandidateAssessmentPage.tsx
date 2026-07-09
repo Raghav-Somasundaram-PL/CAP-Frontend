@@ -378,15 +378,6 @@ export function CandidateAssessmentPage() {
           : [];
       const samplePassed = currentSampleCases.filter((item) => item.passed).length;
       const sampleTotal = currentSampleCases.length;
-      const answerSignal = !sourceCode.trim()
-        ? 0
-        : isSubmitted
-          ? sampleTotal
-            ? Math.min(100, 70 + Math.round((samplePassed / sampleTotal) * 30))
-            : 82
-          : sampleTotal
-            ? Math.min(88, 45 + Math.round((samplePassed / sampleTotal) * 35))
-            : Math.min(75, 35 + Math.min(lineCount, 40));
 
       return {
         question,
@@ -404,7 +395,6 @@ export function CandidateAssessmentPage() {
         submittedAt: serverDraft?.submitted_at || null,
         samplePassed,
         sampleTotal,
-        answerSignal,
       };
     }) || [];
   const mandatoryUnansweredCount = questionSubmissionSummary.filter(
@@ -1454,15 +1444,8 @@ export function CandidateAssessmentPage() {
               ) : null}
               <div className="candidate-final-question-summary">
                 <div className="candidate-final-summary-heading">
-                  <div>
-                    <span className="candidate-kicker">Question Review</span>
-                    <h3>Your answers before final submission</h3>
-                  </div>
-                  <p>
-                    The understanding signal is an answer-completion estimate from
-                    code presence, saved/submitted state, and visible sample test
-                    results.
-                  </p>
+                  <span className="candidate-kicker">Question Review</span>
+                  <h3>Your answers before final submission</h3>
                 </div>
                 {questionSubmissionSummary.map((item) => (
                   <article key={item.question.id} className="candidate-final-question-card">
@@ -1506,12 +1489,6 @@ export function CandidateAssessmentPage() {
                             : "Not saved yet"}
                       </span>
                     </div>
-                    <div className="candidate-understanding-meter">
-                      <div>
-                        <span style={{ width: `${item.answerSignal}%` }} />
-                      </div>
-                      <strong>{item.answerSignal}% answer signal</strong>
-                    </div>
                     <pre className="candidate-final-code-preview">
                       {item.sourceCode.trim() || "No code answered for this question."}
                     </pre>
@@ -1535,7 +1512,7 @@ export function CandidateAssessmentPage() {
                   variant="secondary"
                   onClick={() => setShowSubmitAssessmentDialog(false)}
                 >
-                  Continue Test
+                  Continue Test Slot
                 </Button>
                 <Button
                   type="button"

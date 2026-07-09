@@ -5,6 +5,10 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import type { QuestionAIDraftProgressEvent } from "../types/QuestionBank";
 import { languageDisplayName } from "../utils/questionLanguage";
+import {
+  formatGenerationLabel,
+  formatGenerationMessage,
+} from "../utils/questionGenerationLabels";
 
 type AgentRunScope =
   | "full"
@@ -57,8 +61,11 @@ export function AgentRunOverlay({
         event.type !== "validation_case_start" && event.type !== "validation_case_result",
     )
     .slice(-5);
-  const liveCommentary = latestEvent?.message || commentary;
+  const liveCommentary = formatGenerationMessage(latestEvent?.message || commentary);
   const progressValue = latestEvent?.progress ?? null;
+  const progressNodeLabel = formatGenerationLabel(
+    latestEvent?.next_node || latestEvent?.current_node,
+  );
   const latestModelEvent = [...progressEvents]
     .reverse()
     .find((event) => Boolean(event.ai_model));
@@ -109,7 +116,7 @@ export function AgentRunOverlay({
             <div className="agent-run-progress-head">
               <div>
                 <span>Live progress</span>
-                <strong>{latestEvent?.next_node || latestEvent?.current_node || "working"}</strong>
+                <strong>{progressNodeLabel}</strong>
               </div>
               <em>{progressValue}%</em>
             </div>
@@ -208,7 +215,7 @@ export function AgentRunOverlay({
                   .join(" ")}
               >
                 <span aria-hidden="true" />
-                <p>{event.message}</p>
+                <p>{formatGenerationMessage(event.message)}</p>
               </div>
             ))}
           </div>

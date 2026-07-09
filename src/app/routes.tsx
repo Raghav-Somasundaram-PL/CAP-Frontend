@@ -1,8 +1,18 @@
 import { lazy } from "react";
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 
 import { AppLayout } from "../layouts/AppLayout";
 import { ProtectedRoute } from "../features/auth";
+import { PortalDocumentMeta } from "../components/common/PortalDocumentMeta";
+
+function RootLayout() {
+  return (
+    <>
+      <PortalDocumentMeta />
+      <Outlet />
+    </>
+  );
+}
 
 const RecruitersPage = lazy(() =>
   import("../features/recruiters").then((module) => ({
@@ -76,6 +86,9 @@ const CandidateSubmissionPage = lazy(() =>
 );
 
 export const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    children: [
   { path: "/", element: <Navigate to="/recruiter/dashboard" replace /> },
   {
     path: "/recruiter/login",
@@ -184,4 +197,6 @@ export const router = createBrowserRouter([
     element: <CandidateSubmissionPage />,
   },
   { path: "*", element: <Navigate to="/recruiter/login" replace /> },
+    ],
+  },
 ]);

@@ -64,11 +64,17 @@ function localMonacoAssets(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), localMonacoAssets()],
   server: {
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8001",
+        changeOrigin: true,
+      },
+    },
     headers: {
       "Content-Security-Policy": [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://www.gstatic.com https://accounts.google.com",
-        "connect-src 'self' http://localhost:8000 http://localhost:5173 https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://firebase.googleapis.com https://firebaseinstallations.googleapis.com",
+        "connect-src 'self' http://localhost:5173 http://localhost:8001 http://127.0.0.1:8001 https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://accounts.google.com https://firebase.googleapis.com https://firebaseinstallations.googleapis.com",
         "frame-src 'self' https://apis.google.com https://accounts.google.com https://*.firebaseapp.com https://*.google.com",
         "style-src 'self' 'unsafe-inline' https://accounts.google.com",
         "img-src 'self' data: blob: https: https://*.googleusercontent.com https://www.gstatic.com"
