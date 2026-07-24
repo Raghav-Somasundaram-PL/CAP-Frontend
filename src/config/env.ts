@@ -9,7 +9,10 @@ interface EnvConfig {
   firebaseAppId?: string;
 }
 
-function readEnvValue(key: keyof ImportMetaEnv, fallback: string): string {
+function readEnvValue(
+  key: keyof ImportMetaEnv,
+  fallback = "",
+): string {
   return import.meta.env[key] || fallback;
 }
 
@@ -20,8 +23,8 @@ export const env: EnvConfig = {
   coreApiBaseUrl: `${apiGatewayBaseUrl}/core`,
   codeExecutionApiBaseUrl: `${apiGatewayBaseUrl}/code-execution`,
   codeEvaluationApiBaseUrl: `${apiGatewayBaseUrl}/code-evaluation`,
-  firebaseApiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  firebaseAuthDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  firebaseProjectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  firebaseAppId: import.meta.env.VITE_FIREBASE_APP_ID,
+  firebaseApiKey: readEnvValue("VITE_FIREBASE_API_KEY"),
+  firebaseAuthDomain: readEnvValue("VITE_FIREBASE_AUTH_DOMAIN"),
+  firebaseProjectId: readEnvValue("VITE_FIREBASE_PROJECT_ID"),
+  firebaseAppId: readEnvValue("VITE_FIREBASE_APP_ID"),
 };
